@@ -28,7 +28,7 @@ export type IndicatorDefinition = {
     paneLabelClassName: string;
     testId: string;
     options: HistogramSeriesPartialOptions;
-    colorToken?: "--accent";
+    colorToken?: "--accent" | "--indicator-fa";
   };
 };
 
@@ -85,7 +85,7 @@ export const indicatorRegistry: Record<IndicatorId, IndicatorDefinition> = {
         lastValueVisible: true,
         priceFormat: { type: "custom", formatter: (value: number) => value.toFixed(2) },
       },
-      colorToken: "--accent",
+      colorToken: "--indicator-fa",
     },
   },
 };

@@ -2,6 +2,8 @@
 
 import { BarChart3, Database, PanelLeftClose, PanelLeftOpen, Settings2 } from "lucide-react";
 
+import { KejoraMark } from "@/components/brand/kejora-mark";
+
 type Props = {
   watchlistCollapsed: boolean;
   onToggleWatchlist: () => void;
@@ -11,8 +13,8 @@ export function NavigationRail({ watchlistCollapsed, onToggleWatchlist }: Props)
   const ToggleIcon = watchlistCollapsed ? PanelLeftOpen : PanelLeftClose;
   return (
     <nav className="nav-rail" aria-label="Workspace navigation">
-      <div className="nav-rail__mark" aria-label="Ningguang terminal">
-        <span aria-hidden="true">N</span>
+      <div className="nav-rail__mark" aria-label="KEJORA equity research tools">
+        <KejoraMark title="KEJORA" />
       </div>
       <div className="nav-rail__group">
         <button className="rail-button rail-button--active" type="button" aria-label="Chart workspace" data-tooltip="Chart workspace">

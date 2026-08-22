@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { HistoryBar } from "@/lib/api/types";
 
-import { filterBarsByTimeframe, toCandles, toFrequencyAnalyzer } from "./adapter";
+import { filterBarsByTimeframe, toCandles, toFrequencyAnalyzer, toLine } from "./adapter";
 
 const bar = (date: string, raw: number | null = 0.001): HistoryBar => ({
   date,
@@ -25,6 +25,10 @@ describe("chart adapter", () => {
     expect(toCandles(bars).map((item) => item.time)).toEqual(
       toFrequencyAnalyzer(bars).map((item) => item.time),
     );
+  });
+
+  it("maps closing prices for presentation-only line mode", () => {
+    expect(toLine([bar("2026-08-21")])).toEqual([{ time: "2026-08-21", value: 11 }]);
   });
 
   it("filters relative to the latest market bar", () => {

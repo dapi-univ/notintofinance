@@ -16,7 +16,7 @@ const MAX_WATCHLIST = 390;
 export function DashboardClient({ initialTicker }: { initialTicker: string }) {
   const [activeTicker, setActiveTicker] = useState(initialTicker);
   const [watchlistCollapsed, setWatchlistCollapsed] = useState(false);
-  const [watchlistWidth, setWatchlistWidth] = useState(304);
+  const [watchlistWidth, setWatchlistWidth] = useState(316);
   const [timeframe, setTimeframe] = useState<Timeframe>("6M");
   const [, startTransition] = useTransition();
   const shellRef = useRef<HTMLDivElement>(null);

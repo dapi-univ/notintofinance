@@ -4,7 +4,7 @@ import type { IChartApi, ISeriesApi, SeriesDefinition } from "lightweight-charts
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { HistoryBar } from "@/lib/api/types";
-import { filterBarsByTimeframe, toCandles, type Timeframe } from "@/lib/chart/adapter";
+import { filterBarsByTimeframe, toCandles, toLine, type ChartType, type Timeframe } from "@/lib/chart/adapter";
 import { syncIndicatorSeries } from "@/lib/chart/indicator-series";
 import {
   indicatorDefinitions,
@@ -16,6 +16,7 @@ import {
 type Props = {
   bars: HistoryBar[];
   timeframe: Timeframe;
+  chartType: ChartType;
   enabledIndicators: ReadonlySet<IndicatorId>;
 };
 
@@ -34,10 +35,11 @@ function colorWithOpacity(color: string, opacity: number): string {
   return rgb ? `rgba(${rgb[1]}, ${rgb[2]}, ${rgb[3]}, ${opacity})` : color;
 }
 
-export function MarketChart({ bars, timeframe, enabledIndicators }: Props) {
+export function MarketChart({ bars, timeframe, chartType, enabledIndicators }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const lineRef = useRef<ISeriesApi<"Area"> | null>(null);
   const histogramDefinitionRef = useRef<SeriesDefinition<"Histogram"> | null>(null);
   const indicatorSeriesRef = useRef(new Map<IndicatorId, ISeriesApi<"Histogram">>());
   const indicatorThemeRef = useRef<IndicatorRenderTheme>({
@@ -58,17 +60,18 @@ export function MarketChart({ bars, timeframe, enabledIndicators }: Props) {
     const indicatorSeries = indicatorSeriesRef.current;
     async function initialize() {
       if (!containerRef.current) return;
-      const { CandlestickSeries, ColorType, HistogramSeries, CrosshairMode, createChart } = await import("lightweight-charts");
+      const { AreaSeries, CandlestickSeries, ColorType, HistogramSeries, CrosshairMode, createChart } = await import("lightweight-charts");
       if (disposed || !containerRef.current) return;
       const styles = getComputedStyle(document.documentElement);
-      const background = cssColor(styles, "--bg-chart", "#101416");
-      const text = cssColor(styles, "--text-muted", "#737a78");
-      const border = cssColor(styles, "--chart-axis", "#303736");
-      const grid = cssColor(styles, "--chart-grid", "rgba(112, 120, 116, 0.1)");
-      const separator = cssColor(styles, "--border-subtle", "#262c2c");
-      const separatorHover = cssColor(styles, "--border-active", "#78613a");
-      const marketUp = cssColor(styles, "--market-up", "#4f9f7d");
-      const marketDown = cssColor(styles, "--market-down", "#c25b56");
+      const background = cssColor(styles, "--bg-chart", "#141716");
+      const text = cssColor(styles, "--text-muted", "#8f8f8f");
+      const border = cssColor(styles, "--chart-axis", "#414743");
+      const grid = cssColor(styles, "--chart-grid", "rgba(255, 255, 255, 0.045)");
+      const separator = cssColor(styles, "--border-muted", "rgba(255, 255, 255, 0.085)");
+      const separatorHover = cssColor(styles, "--accent", "#20d978");
+      const marketUp = cssColor(styles, "--market-up", "#20d978");
+      const marketDown = cssColor(styles, "--market-down", "#ef6a75");
+      const accent = cssColor(styles, "--accent", "#20d978");
       indicatorThemeRef.current = {
         volumeUp: colorWithOpacity(marketUp, 0.58),
         volumeDown: colorWithOpacity(marketDown, 0.54),
@@ -78,7 +81,7 @@ export function MarketChart({ bars, timeframe, enabledIndicators }: Props) {
         layout: {
           background: { type: ColorType.Solid, color: background },
           textColor: text,
-          fontFamily: "var(--font-ui)",
+          fontFamily: getComputedStyle(document.body).fontFamily,
           fontSize: 11,
           panes: {
             separatorColor: separator,
@@ -108,8 +111,21 @@ export function MarketChart({ bars, timeframe, enabledIndicators }: Props) {
         priceLineVisible: true,
         lastValueVisible: true,
       });
+      const line = chart.addSeries(AreaSeries, {
+        lineColor: accent,
+        lineWidth: 2,
+        topColor: colorWithOpacity(accent, 0.18),
+        bottomColor: colorWithOpacity(accent, 0.01),
+        crosshairMarkerBackgroundColor: accent,
+        crosshairMarkerBorderColor: background,
+        priceLineColor: colorWithOpacity(accent, 0.55),
+        priceLineVisible: true,
+        lastValueVisible: true,
+        visible: false,
+      });
       chartRef.current = chart;
       candleRef.current = candles;
+      lineRef.current = line;
       histogramDefinitionRef.current = HistogramSeries;
       observer = new ResizeObserver(() => {
         if (containerRef.current) chart.resize(containerRef.current.clientWidth, containerRef.current.clientHeight);
@@ -124,16 +140,24 @@ export function MarketChart({ bars, timeframe, enabledIndicators }: Props) {
       chartRef.current?.remove();
       chartRef.current = null;
       candleRef.current = null;
+      lineRef.current = null;
       histogramDefinitionRef.current = null;
       indicatorSeries.clear();
     };
   }, []);
 
   useEffect(() => {
-    if (!ready || !chartRef.current || !candleRef.current) return;
+    if (!ready || !chartRef.current || !candleRef.current || !lineRef.current) return;
     candleRef.current.setData(toCandles(filteredBars) as Parameters<typeof candleRef.current.setData>[0]);
+    lineRef.current.setData(toLine(filteredBars) as Parameters<typeof lineRef.current.setData>[0]);
     chartRef.current.timeScale().fitContent();
   }, [filteredBars, ready]);
+
+  useEffect(() => {
+    if (!ready || !candleRef.current || !lineRef.current) return;
+    candleRef.current.applyOptions({ visible: chartType === "candlestick" });
+    lineRef.current.applyOptions({ visible: chartType === "line" });
+  }, [chartType, ready]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -149,7 +173,7 @@ export function MarketChart({ bars, timeframe, enabledIndicators }: Props) {
       createSeries: (definition: IndicatorDefinition) => {
         const styles = getComputedStyle(document.documentElement);
         const tokenColor = definition.rendering.colorToken
-          ? cssColor(styles, definition.rendering.colorToken, "#b89554")
+          ? cssColor(styles, definition.rendering.colorToken, "#20d978")
           : undefined;
         return chart.addSeries(
           histogramDefinition,

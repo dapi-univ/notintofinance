@@ -35,8 +35,8 @@ export function WatchlistPanel({ stocks, selectedTicker, loading, error, onRetry
     <aside className="watchlist" aria-label="Stock watchlist">
       <header className="watchlist__header">
         <div className="product-lockup">
-          <h2>NINGGUANG</h2>
-          <p>LIYUE SOVEREIGN WEALTH FUND</p>
+          <h2>KEJORA</h2>
+          <p>Equity Research Tools</p>
         </div>
         <div className="watchlist__header-actions">
           <span className="watchlist__market-label">IDX · EOD</span>

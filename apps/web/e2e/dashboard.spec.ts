@@ -3,17 +3,29 @@ import { expect, test } from "@playwright/test";
 test("critical Dashboard V0 workspace flow", async ({ page }) => {
   await page.goto("/app");
 
-  await expect(page.getByText("NINGGUANG", { exact: true })).toBeVisible();
-  await expect(page.getByText("LIYUE SOVEREIGN WEALTH FUND", { exact: true })).toBeVisible();
+  await expect(page).toHaveTitle("KEJORA · Equity Research Tools");
+  await expect(page.getByText("KEJORA", { exact: true })).toBeVisible();
+  await expect(page.getByText("Equity Research Tools", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("KEJORA equity research tools").locator("path")).toHaveCount(3);
   await expect(page.getByTestId("active-ticker")).toHaveText("BBCA");
   await expect(page.getByTestId("market-chart")).toBeVisible();
   await expect(page.getByTestId("volume-pane")).toBeVisible();
   await expect(page.locator("canvas").first()).toBeVisible();
 
+  const candlestickMode = page.getByRole("button", { name: "Candlestick", exact: true });
+  const lineMode = page.getByRole("button", { name: "Line", exact: true });
+  await expect(candlestickMode).toHaveAttribute("aria-pressed", "true");
+  await lineMode.click();
+  await expect(lineMode).toHaveAttribute("aria-pressed", "true");
+
   await page.locator('[data-ticker="ANTM"]').click();
   await expect(page.getByTestId("active-ticker")).toHaveText("ANTM");
+  await expect(lineMode).toHaveAttribute("aria-pressed", "true");
   await expect(page).toHaveURL(/ticker=ANTM/);
   await expect(page.getByRole("heading", { name: "Aneka Tambang Tbk." })).toBeVisible();
+
+  await candlestickMode.click();
+  await expect(candlestickMode).toHaveAttribute("aria-pressed", "true");
 
   await page.getByText("Indicators", { exact: true }).click();
   await page.getByLabel("Frequency Analyzer").check();

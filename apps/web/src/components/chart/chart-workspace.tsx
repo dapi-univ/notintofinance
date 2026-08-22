@@ -4,7 +4,7 @@ import { RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { HistoryResponse } from "@/lib/api/types";
-import type { Timeframe } from "@/lib/chart/adapter";
+import type { ChartType, Timeframe } from "@/lib/chart/adapter";
 import { dataStatusLabel } from "@/lib/market/freshness";
 import type { IndicatorId } from "@/lib/indicators/registry";
 
@@ -29,6 +29,7 @@ export function ChartWorkspace({ ticker, history, loading, fetching, error, onRe
   const [enabledIndicators, setEnabledIndicators] = useState<Set<IndicatorId>>(
     () => new Set<IndicatorId>(["volume"]),
   );
+  const [chartType, setChartType] = useState<ChartType>("candlestick");
   const validHistory = history?.ticker === ticker ? history : undefined;
   const hasData = Boolean(validHistory?.bars.length);
   const toggleIndicator = (id: IndicatorId) => {
@@ -50,7 +51,14 @@ export function ChartWorkspace({ ticker, history, loading, fetching, error, onRe
     <main className="chart-workspace">
       <SymbolHeader ticker={ticker} history={validHistory} loading={loading || fetching} />
       <div className="workspace-control-row">
-        <ChartToolbar timeframe={timeframe} onTimeframe={onTimeframe} enabledIndicators={enabledIndicators} onToggleIndicator={toggleIndicator} />
+        <ChartToolbar
+          timeframe={timeframe}
+          onTimeframe={onTimeframe}
+          chartType={chartType}
+          onChartType={setChartType}
+          enabledIndicators={enabledIndicators}
+          onToggleIndicator={toggleIndicator}
+        />
         <div className="data-freshness" data-status={statusMode}>
           <span className="data-freshness__dot" />
           <strong>{statusText}</strong>
@@ -62,7 +70,7 @@ export function ChartWorkspace({ ticker, history, loading, fetching, error, onRe
         {error ? <ChartState kind="error" onRetry={onRetry} /> : null}
         {!loading && !error && !hasData ? <ChartState kind="empty" /> : null}
         {!loading && !error && hasData && validHistory ? (
-          <MarketChart bars={validHistory.bars} timeframe={timeframe} enabledIndicators={enabledIndicators} />
+          <MarketChart bars={validHistory.bars} timeframe={timeframe} chartType={chartType} enabledIndicators={enabledIndicators} />
         ) : null}
         {fetching && hasData ? (
           <div className="chart-refresh" role="status"><RefreshCw aria-hidden="true" size={13} /> Updating {ticker}</div>

@@ -2,6 +2,7 @@ import type { HistoryBar } from "@/lib/api/types";
 import { toNumber } from "@/lib/format/market";
 
 export type Timeframe = "1M" | "3M" | "6M" | "1Y" | "ALL";
+export type ChartType = "candlestick" | "line";
 
 export type VolumeHistogramColors = {
   up: string;
@@ -30,6 +31,13 @@ export function toCandles(bars: HistoryBar[]) {
     high: Number(bar.high),
     low: Number(bar.low),
     close: Number(bar.close),
+  }));
+}
+
+export function toLine(bars: HistoryBar[]) {
+  return bars.map((bar) => ({
+    time: bar.date,
+    value: Number(bar.close),
   }));
 }
 

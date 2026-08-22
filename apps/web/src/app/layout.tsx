@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist_Mono, Manrope } from "next/font/google";
 
 import { QueryProvider } from "@/components/providers/query-provider";
 
 import "./globals.css";
 
-const geistSans = Geist({
+const manrope = Manrope({
   subsets: ["latin"],
-  variable: "--font-geist-sans",
+  variable: "--font-manrope",
 });
 
 const geistMono = Geist_Mono({
@@ -16,13 +16,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NINGGUANG · IDX Research Terminal",
-  description: "Institutional end-of-day Indonesian equities research workspace.",
+  title: "KEJORA · Equity Research Tools",
+  description: "Premium end-of-day Indonesian equities research workspace.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+    <html lang="en" className={`${manrope.variable} ${geistMono.variable}`}>
       <body>
         <QueryProvider>{children}</QueryProvider>
       </body>
