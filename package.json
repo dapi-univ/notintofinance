@@ -1,0 +1,23 @@
+{
+  "name": "idx-terminal",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace @idx-terminal/web",
+    "dev:api": "uv run --project apps/api uvicorn app.main:app --reload --port 8000",
+    "lint": "npm run lint --workspace @idx-terminal/web && uv run --project apps/api ruff check apps/api",
+    "typecheck": "npm run typecheck --workspace @idx-terminal/web && uv run --project apps/api mypy apps/api/app",
+    "test": "npm run test --workspace @idx-terminal/web && uv run --project apps/api pytest apps/api/tests",
+    "test:e2e": "npm run test:e2e --workspace @idx-terminal/web",
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run test:e2e"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "devDependencies": {
+    "jsdom": "29.0.0"
+  }
+}

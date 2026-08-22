@@ -1,0 +1,16 @@
+import { describe, expect, it } from "vitest";
+
+import { indicatorDefinitions, indicatorRegistry } from "./registry";
+
+describe("indicator registry", () => {
+  it("is the single source of truth for V0 panes", () => {
+    expect(indicatorDefinitions.map((item) => item.id)).toEqual([
+      "volume",
+      "frequency-analyzer",
+    ]);
+    expect(indicatorRegistry.volume.defaultVisible).toBe(true);
+    expect(indicatorRegistry["frequency-analyzer"].normalization).toBe(
+      "log10(raw shares)",
+    );
+  });
+});

@@ -1,0 +1,29 @@
+.DS_Store
+.idea/
+.vscode/
+
+# JavaScript
+node_modules/
+.next/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+next-env.d.ts
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environment and local service state
+.env
+.env.*
+!.env.example
+supabase/.branches/
+supabase/.temp/
