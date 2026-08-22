@@ -3,6 +3,8 @@ import { expect, test } from "@playwright/test";
 test("critical Dashboard V0 workspace flow", async ({ page }) => {
   await page.goto("/app");
 
+  await expect(page.getByText("NINGGUANG", { exact: true })).toBeVisible();
+  await expect(page.getByText("LIYUE SOVEREIGN WEALTH FUND", { exact: true })).toBeVisible();
   await expect(page.getByTestId("active-ticker")).toHaveText("BBCA");
   await expect(page.getByTestId("market-chart")).toBeVisible();
   await expect(page.getByTestId("volume-pane")).toBeVisible();

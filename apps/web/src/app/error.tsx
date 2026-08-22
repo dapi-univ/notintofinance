@@ -3,7 +3,9 @@
 export default function GlobalError({ reset }: { reset: () => void }) {
   return (
     <main className="route-error">
-      <p>Dashboard workspace could not be loaded.</p>
+      <p className="route-error__brand">NINGGUANG</p>
+      <strong>Research workspace unavailable</strong>
+      <p>The terminal could not complete its initialization sequence.</p>
       <button type="button" onClick={reset}>
         Retry
       </button>

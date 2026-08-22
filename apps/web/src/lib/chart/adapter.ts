@@ -32,7 +32,7 @@ export function toVolume(bars: HistoryBar[]) {
   return bars.map((bar) => ({
     time: bar.date,
     value: bar.volume_shares,
-    color: Number(bar.close) >= Number(bar.open) ? "rgba(54, 179, 126, 0.58)" : "rgba(235, 87, 87, 0.52)",
+    color: Number(bar.close) >= Number(bar.open) ? "rgba(79, 159, 125, 0.58)" : "rgba(194, 91, 86, 0.54)",
   }));
 }
 

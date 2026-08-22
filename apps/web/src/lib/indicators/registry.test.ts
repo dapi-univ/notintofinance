@@ -9,6 +9,8 @@ describe("indicator registry", () => {
       "frequency-analyzer",
     ]);
     expect(indicatorRegistry.volume.defaultVisible).toBe(true);
+    expect(indicatorRegistry.volume.category).toBe("market-data");
+    expect(indicatorRegistry["frequency-analyzer"].category).toBe("analytics");
     expect(indicatorRegistry["frequency-analyzer"].normalization).toBe(
       "log10(raw shares)",
     );

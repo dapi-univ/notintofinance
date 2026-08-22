@@ -5,10 +5,12 @@ import { toFrequencyAnalyzer, toVolume } from "@/lib/chart/adapter";
 import { formatCompact, toNumber } from "@/lib/format/market";
 
 export type IndicatorId = "volume" | "frequency-analyzer";
+export type IndicatorCategory = "market-data" | "analytics";
 
 export type IndicatorDefinition = {
   id: IndicatorId;
   label: string;
+  category: IndicatorCategory;
   kind: "pane";
   defaultVisible: boolean;
   requires: Array<keyof HistoryBar>;
@@ -22,13 +24,20 @@ export type IndicatorDefinition = {
     paneLabelClassName: string;
     testId: string;
     options: HistogramSeriesPartialOptions;
+    colorToken?: "--accent";
   };
 };
+
+export const indicatorGroups: Array<{ id: IndicatorCategory; label: string }> = [
+  { id: "market-data", label: "Market Data" },
+  { id: "analytics", label: "Analytics" },
+];
 
 export const indicatorRegistry: Record<IndicatorId, IndicatorDefinition> = {
   volume: {
     id: "volume",
     label: "Volume",
+    category: "market-data",
     kind: "pane",
     defaultVisible: true,
     requires: ["volume_shares"],
@@ -51,6 +60,7 @@ export const indicatorRegistry: Record<IndicatorId, IndicatorDefinition> = {
   "frequency-analyzer": {
     id: "frequency-analyzer",
     label: "Frequency Analyzer",
+    category: "analytics",
     kind: "pane",
     defaultVisible: false,
     requires: ["volume_shares", "frequency", "frequency_analyzer_raw_shares"],
@@ -67,11 +77,11 @@ export const indicatorRegistry: Record<IndicatorId, IndicatorDefinition> = {
       paneLabelClassName: "pane-label--frequency",
       testId: "frequency-analyzer-pane",
       options: {
-        color: "#e0a84b",
         priceLineVisible: false,
         lastValueVisible: true,
         priceFormat: { type: "custom", formatter: (value: number) => value.toFixed(2) },
       },
+      colorToken: "--accent",
     },
   },
 };

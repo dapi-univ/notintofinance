@@ -19,7 +19,7 @@ export function SymbolHeader({ ticker, history, loading }: Props) {
         <span className="exchange-badge">IDX</span>
         <div>
           <h1>{history?.ticker === ticker ? history.company_name : loading ? "Loading symbol…" : "Unknown symbol"}</h1>
-          <p>End-of-day · Indonesian equities</p>
+          <p>IDX · END-OF-DAY RESEARCH · IDR</p>
         </div>
       </div>
       <div className="symbol-header__quote" aria-label={`Active symbol ${ticker} market summary`}>

@@ -44,16 +44,17 @@ export function ChartWorkspace({ ticker, history, loading, fetching, error, onRe
     () => (status ? dataStatusLabel(status.is_stale, status.is_mock) : "CHECKING"),
     [status],
   );
+  const statusMode = status?.is_mock ? "mock" : status?.is_stale ? "stale" : "current";
 
   return (
     <main className="chart-workspace">
       <SymbolHeader ticker={ticker} history={validHistory} loading={loading || fetching} />
       <div className="workspace-control-row">
         <ChartToolbar timeframe={timeframe} onTimeframe={onTimeframe} enabledIndicators={enabledIndicators} onToggleIndicator={toggleIndicator} />
-        <div className="data-freshness" data-status={status?.is_stale ? "stale" : "current"}>
+        <div className="data-freshness" data-status={statusMode}>
           <span className="data-freshness__dot" />
           <strong>{statusText}</strong>
-          <span>{status?.latest_trade_date ?? "No trade date"}</span>
+          <span className="data-freshness__date">AS OF {status?.latest_trade_date ?? "NO TRADE DATE"}</span>
         </div>
       </div>
       <section className="chart-stage" aria-label={`${ticker} synchronized price and indicator chart`}>

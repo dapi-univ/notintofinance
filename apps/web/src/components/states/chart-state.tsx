@@ -18,7 +18,9 @@ export function ChartState({ kind, onRetry }: Props) {
   }
   return (
     <div className="surface-state surface-state--chart">
-      <p>{kind === "empty" ? "No market data available for this symbol." : "Chart data is unavailable."}</p>
+      <p className="surface-state__eyebrow">MARKET DATA</p>
+      <strong>{kind === "empty" ? "No history available" : "Chart data unavailable"}</strong>
+      <p>{kind === "empty" ? "No market data is available for this symbol." : "The synchronized history payload could not be loaded."}</p>
       {kind === "error" && onRetry ? <button type="button" onClick={onRetry}>Retry</button> : null}
     </div>
   );

@@ -34,13 +34,16 @@ export function WatchlistPanel({ stocks, selectedTicker, loading, error, onRetry
   return (
     <aside className="watchlist" aria-label="Stock watchlist">
       <header className="watchlist__header">
-        <div>
-          <p className="eyebrow">MARKET LIST</p>
-          <h2>IDX Watchlist</h2>
+        <div className="product-lockup">
+          <h2>NINGGUANG</h2>
+          <p>LIYUE SOVEREIGN WEALTH FUND</p>
         </div>
-        <button className="icon-button watchlist__mobile-close" type="button" aria-label="Close watchlist" onClick={onClose}>
-          <X aria-hidden="true" size={16} />
-        </button>
+        <div className="watchlist__header-actions">
+          <span className="watchlist__market-label">IDX · EOD</span>
+          <button className="icon-button watchlist__mobile-close" type="button" aria-label="Close watchlist" onClick={onClose}>
+            <X aria-hidden="true" size={16} />
+          </button>
+        </div>
       </header>
       <label className="watchlist-search">
         <Search aria-hidden="true" size={15} />
@@ -49,8 +52,8 @@ export function WatchlistPanel({ stocks, selectedTicker, loading, error, onRetry
       </label>
       <div className="watchlist__columns" aria-hidden="true">
         <span>SYMBOL</span>
-        <span>30D</span>
-        <span>LAST / CHG</span>
+        <span>30D TREND</span>
+        <span>LAST / %</span>
       </div>
       <div className="watchlist__rows">
         {loading ? Array.from({ length: 6 }, (_, index) => <div className="watchlist-skeleton" key={index} />) : null}
