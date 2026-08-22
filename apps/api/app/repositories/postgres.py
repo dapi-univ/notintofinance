@@ -63,7 +63,7 @@ class PostgresMarketRepository:
             return _stock_identity(stock) if stock else None
 
     async def get_history(
-        self, ticker: str, *, date_from: date | None, date_to: date | None, limit: int
+        self, ticker: str, *, date_from: date | None, date_to: date | None, limit: int | None
     ) -> list[MarketBar]:
         async with self._database.session() as session:
             statement = (
@@ -75,7 +75,9 @@ class PostgresMarketRepository:
                 statement = statement.where(DailyMarketData.trade_date >= date_from)
             if date_to:
                 statement = statement.where(DailyMarketData.trade_date <= date_to)
-            statement = statement.order_by(DailyMarketData.trade_date.desc()).limit(limit)
+            statement = statement.order_by(DailyMarketData.trade_date.desc())
+            if limit is not None:
+                statement = statement.limit(limit)
             rows = list((await session.scalars(statement)).all())
             rows.reverse()
             return [_market_bar(row) for row in rows]
@@ -136,9 +138,14 @@ class PostgresMarketRepository:
         inserted = len(set(dates) - existing_dates)
         return inserted, len(bars) - inserted
 
-    async def latest_trade_date(self) -> date | None:
+    async def latest_trade_date(self, ticker: str | None = None) -> date | None:
         async with self._database.session() as session:
-            return await session.scalar(select(func.max(DailyMarketData.trade_date)))
+            statement = select(func.max(DailyMarketData.trade_date))
+            if ticker:
+                statement = statement.join(Stock, Stock.id == DailyMarketData.stock_id).where(
+                    Stock.ticker == ticker.upper()
+                )
+            return await session.scalar(statement)
 
     async def start_ingestion(self, provider: str, requested_date: date | None) -> int:
         async with self._database.session() as session, session.begin():

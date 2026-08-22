@@ -1,30 +1,40 @@
 "use client";
 
-import type { IChartApi, ISeriesApi, Time } from "lightweight-charts";
+import type { IChartApi, ISeriesApi, SeriesDefinition } from "lightweight-charts";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { HistoryBar } from "@/lib/api/types";
 import { filterBarsByTimeframe, toCandles, type Timeframe } from "@/lib/chart/adapter";
-import { indicatorRegistry } from "@/lib/indicators/registry";
+import { syncIndicatorSeries } from "@/lib/chart/indicator-series";
+import {
+  indicatorDefinitions,
+  type IndicatorDefinition,
+  type IndicatorId,
+} from "@/lib/indicators/registry";
 
 type Props = {
   bars: HistoryBar[];
   timeframe: Timeframe;
-  frequencyAnalyzerEnabled: boolean;
+  enabledIndicators: ReadonlySet<IndicatorId>;
 };
 
-export function MarketChart({ bars, timeframe, frequencyAnalyzerEnabled }: Props) {
+export function MarketChart({ bars, timeframe, enabledIndicators }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
-  const frequencyRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const histogramDefinitionRef = useRef<SeriesDefinition<"Histogram"> | null>(null);
+  const indicatorSeriesRef = useRef(new Map<IndicatorId, ISeriesApi<"Histogram">>());
   const [ready, setReady] = useState(false);
   const filteredBars = useMemo(() => filterBarsByTimeframe(bars, timeframe), [bars, timeframe]);
+  const enabledDefinitions = useMemo(
+    () => indicatorDefinitions.filter((definition) => enabledIndicators.has(definition.id)),
+    [enabledIndicators],
+  );
 
   useEffect(() => {
     let disposed = false;
     let observer: ResizeObserver | null = null;
+    const indicatorSeries = indicatorSeriesRef.current;
     async function initialize() {
       if (!containerRef.current) return;
       const { CandlestickSeries, ColorType, HistogramSeries, CrosshairMode, createChart } = await import("lightweight-charts");
@@ -60,14 +70,9 @@ export function MarketChart({ bars, timeframe, frequencyAnalyzerEnabled }: Props
         priceLineVisible: true,
         lastValueVisible: true,
       });
-      const volume = chart.addSeries(
-        HistogramSeries,
-        { priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false },
-        1,
-      );
       chartRef.current = chart;
       candleRef.current = candles;
-      volumeRef.current = volume;
+      histogramDefinitionRef.current = HistogramSeries;
       observer = new ResizeObserver(() => {
         if (containerRef.current) chart.resize(containerRef.current.clientWidth, containerRef.current.clientHeight);
       });
@@ -81,17 +86,14 @@ export function MarketChart({ bars, timeframe, frequencyAnalyzerEnabled }: Props
       chartRef.current?.remove();
       chartRef.current = null;
       candleRef.current = null;
-      volumeRef.current = null;
-      frequencyRef.current = null;
+      histogramDefinitionRef.current = null;
+      indicatorSeries.clear();
     };
   }, []);
 
   useEffect(() => {
-    if (!ready || !chartRef.current || !candleRef.current || !volumeRef.current) return;
+    if (!ready || !chartRef.current || !candleRef.current) return;
     candleRef.current.setData(toCandles(filteredBars) as Parameters<typeof candleRef.current.setData>[0]);
-    volumeRef.current.setData(
-      indicatorRegistry.volume.transform(filteredBars) as Parameters<typeof volumeRef.current.setData>[0],
-    );
     chartRef.current.timeScale().fitContent();
     requestAnimationFrame(() => {
       const panes = chartRef.current?.panes();
@@ -103,57 +105,39 @@ export function MarketChart({ bars, timeframe, frequencyAnalyzerEnabled }: Props
   }, [filteredBars, ready]);
 
   useEffect(() => {
-    if (!ready || !chartRef.current) return;
-    let cancelled = false;
-    async function updateFrequencyPane() {
-      if (!chartRef.current || cancelled) return;
-      if (!frequencyAnalyzerEnabled) {
-        if (frequencyRef.current) {
-          chartRef.current.removeSeries(frequencyRef.current);
-          frequencyRef.current = null;
-        }
-        return;
-      }
-      if (!frequencyRef.current) {
-        const { LineSeries, LineStyle } = await import("lightweight-charts");
-        if (!chartRef.current || cancelled) return;
-        frequencyRef.current = chartRef.current.addSeries(
-          LineSeries,
-          {
-            color: "#e0a84b",
-            lineWidth: 2,
-            lineStyle: LineStyle.Solid,
-            priceLineVisible: false,
-            lastValueVisible: true,
-            priceFormat: { type: "custom", formatter: (value: number) => value.toFixed(2) },
-          },
-          2,
-        );
-      }
-      frequencyRef.current.setData(
-        indicatorRegistry["frequency-analyzer"].transform(filteredBars) as Array<{ time: Time; value: number }>,
-      );
-    }
-    void updateFrequencyPane();
-    return () => {
-      cancelled = true;
-    };
-  }, [filteredBars, frequencyAnalyzerEnabled, ready]);
+    const chart = chartRef.current;
+    const histogramDefinition = histogramDefinitionRef.current;
+    if (!ready || !chart || !histogramDefinition) return;
+
+    syncIndicatorSeries({
+      bars: filteredBars,
+      definitions: indicatorDefinitions,
+      enabled: enabledIndicators,
+      seriesById: indicatorSeriesRef.current,
+      createSeries: (definition: IndicatorDefinition) =>
+        chart.addSeries(
+          histogramDefinition,
+          definition.rendering.options,
+          definition.rendering.paneIndex,
+        ),
+      removeSeries: (series) => chart.removeSeries(series),
+    });
+  }, [enabledIndicators, filteredBars, ready]);
 
   return (
     <div className="market-chart" data-testid="market-chart">
       <div className="pane-label pane-label--price">PRICE · IDR</div>
-      <div
-        className={`pane-label pane-label--volume ${frequencyAnalyzerEnabled ? "pane-label--volume-with-fa" : ""}`}
-        data-testid="volume-pane"
-      >
-        VOLUME · SHARES
-      </div>
-      {frequencyAnalyzerEnabled ? (
-        <div className="pane-label pane-label--frequency" data-testid="frequency-analyzer-pane">
-          FREQUENCY ANALYZER · LOG10(RAW SHARES)
+      {enabledDefinitions.map((definition, index) => (
+        <div
+          key={definition.id}
+          className={`pane-label ${definition.rendering.paneLabelClassName} ${
+            index < enabledDefinitions.length - 1 ? "pane-label--with-following-pane" : ""
+          }`}
+          data-testid={definition.rendering.testId}
+        >
+          {definition.rendering.paneLabel}
         </div>
-      ) : null}
+      ))}
       <div ref={containerRef} className="market-chart__canvas" />
     </div>
   );

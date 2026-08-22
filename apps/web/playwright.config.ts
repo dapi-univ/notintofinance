@@ -20,6 +20,7 @@ export default defineConfig({
     {
       command: "uv run --project ../api uvicorn app.main:app --host 127.0.0.1 --port 8000",
       url: "http://127.0.0.1:8000/health",
+      env: { ...process.env, APP_ENV: "test", MARKET_DATA_PROVIDER: "mock" },
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },

@@ -33,14 +33,14 @@ class MemoryMarketRepository:
         return self._stocks.get(ticker.upper())
 
     async def get_history(
-        self, ticker: str, *, date_from: date | None, date_to: date | None, limit: int
+        self, ticker: str, *, date_from: date | None, date_to: date | None, limit: int | None
     ) -> list[MarketBar]:
         bars = sorted(self._bars.get(ticker.upper(), {}).values(), key=lambda bar: bar.trade_date)
         if date_from:
             bars = [bar for bar in bars if bar.trade_date >= date_from]
         if date_to:
             bars = [bar for bar in bars if bar.trade_date <= date_to]
-        return bars[-limit:]
+        return bars[-limit:] if limit is not None else bars
 
     async def upsert_history(self, stock: StockIdentity, bars: list[MarketBar]) -> tuple[int, int]:
         self._stocks[stock.ticker] = stock
@@ -50,8 +50,11 @@ class MemoryMarketRepository:
         ticker_bars.update({bar.trade_date: bar for bar in bars})
         return inserted, updated
 
-    async def latest_trade_date(self) -> date | None:
-        dates = [trade_date for bars in self._bars.values() for trade_date in bars]
+    async def latest_trade_date(self, ticker: str | None = None) -> date | None:
+        ticker_bars = (
+            [self._bars.get(ticker.upper(), {})] if ticker else self._bars.values()
+        )
+        dates = [trade_date for bars in ticker_bars for trade_date in bars]
         return max(dates) if dates else None
 
     async def start_ingestion(self, provider: str, requested_date: date | None) -> int:

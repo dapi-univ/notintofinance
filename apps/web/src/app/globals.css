@@ -288,7 +288,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="separat
 .pane-label { position: absolute; left: 10px; z-index: 4; padding: 3px 5px; border: 1px solid rgba(51,64,74,0.7); border-radius: 2px; background: rgba(17,23,29,0.82); color: var(--subtle); font-size: 8px; font-weight: 700; letter-spacing: 0.08em; pointer-events: none; }
 .pane-label--price { top: 8px; }
 .pane-label--volume { bottom: 25%; }
-.pane-label--volume-with-fa { bottom: 44%; }
+.pane-label--with-following-pane { bottom: 44%; }
 .pane-label--frequency { bottom: 8px; color: #a98545; }
 .chart-refresh { position: absolute; top: 8px; right: 84px; z-index: 6; display: flex; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 3px; background: rgba(17,23,29,0.9); color: var(--muted); font-size: 9px; }
 .chart-refresh svg { animation: spin 1s linear infinite; }

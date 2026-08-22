@@ -8,6 +8,7 @@ import { NavigationRail } from "@/components/shell/navigation-rail";
 import { WatchlistPanel } from "@/components/watchlist/watchlist-panel";
 import { fetchHistory } from "@/lib/api/client";
 import { useDataStatus, useHistory, useStocks } from "@/lib/api/queries";
+import type { Timeframe } from "@/lib/chart/adapter";
 
 const MIN_WATCHLIST = 250;
 const MAX_WATCHLIST = 390;
@@ -16,11 +17,12 @@ export function DashboardClient({ initialTicker }: { initialTicker: string }) {
   const [activeTicker, setActiveTicker] = useState(initialTicker);
   const [watchlistCollapsed, setWatchlistCollapsed] = useState(false);
   const [watchlistWidth, setWatchlistWidth] = useState(304);
+  const [timeframe, setTimeframe] = useState<Timeframe>("6M");
   const [, startTransition] = useTransition();
   const shellRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const stocks = useStocks();
-  const history = useHistory(activeTicker);
+  const history = useHistory(activeTicker, timeframe);
   const status = useDataStatus();
 
   const selectTicker = useCallback((ticker: string) => {
@@ -73,7 +75,7 @@ export function DashboardClient({ initialTicker }: { initialTicker: string }) {
             error={stocks.isError}
             onRetry={() => void stocks.refetch()}
             onSelect={selectTicker}
-            onPrefetch={(ticker) => void queryClient.prefetchQuery({ queryKey: ["history", ticker], queryFn: ({ signal }) => fetchHistory(ticker, signal), staleTime: 5 * 60 * 1000 })}
+            onPrefetch={(ticker) => void queryClient.prefetchQuery({ queryKey: ["history", ticker, timeframe], queryFn: ({ signal }) => fetchHistory(ticker, timeframe, signal), staleTime: 5 * 60 * 1000 })}
             onClose={() => setWatchlistCollapsed(true)}
           />
           <div
@@ -101,6 +103,8 @@ export function DashboardClient({ initialTicker }: { initialTicker: string }) {
         error={history.isError}
         onRetry={() => void history.refetch()}
         status={status.data}
+        timeframe={timeframe}
+        onTimeframe={setTimeframe}
       />
     </div>
   );

@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { fetchDataStatus, fetchHistory, fetchStocks } from "./client";
+import type { Timeframe } from "@/lib/chart/adapter";
 
 export function useStocks() {
   return useQuery({
@@ -11,10 +12,10 @@ export function useStocks() {
   });
 }
 
-export function useHistory(ticker: string) {
+export function useHistory(ticker: string, timeframe: Timeframe) {
   return useQuery({
-    queryKey: ["history", ticker],
-    queryFn: ({ signal }) => fetchHistory(ticker, signal),
+    queryKey: ["history", ticker, timeframe],
+    queryFn: ({ signal }) => fetchHistory(ticker, timeframe, signal),
     placeholderData: (previous) => previous,
   });
 }

@@ -16,6 +16,16 @@ test("critical Dashboard V0 workspace flow", async ({ page }) => {
   await page.getByText("Indicators", { exact: true }).click();
   await page.getByLabel("Frequency Analyzer").check();
   await expect(page.getByTestId("frequency-analyzer-pane")).toBeVisible();
+  await page.getByLabel("Frequency Analyzer").uncheck();
+  await expect(page.getByTestId("frequency-analyzer-pane")).toBeHidden();
+  await page.getByLabel("Frequency Analyzer").check();
+  await expect(page.getByTestId("frequency-analyzer-pane")).toBeVisible();
+
+  const allHistoryRequest = page.waitForResponse((response) =>
+    response.url().includes("/stocks/ANTM/history?timeframe=ALL"),
+  );
+  await page.getByRole("button", { name: "ALL", exact: true }).click();
+  await expect(allHistoryRequest).resolves.toBeTruthy();
 
   const widthBefore = await page.getByTestId("market-chart").evaluate((element) => element.getBoundingClientRect().width);
   await page.getByRole("button", { name: "Collapse watchlist" }).click();

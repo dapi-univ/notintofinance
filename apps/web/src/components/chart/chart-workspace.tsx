@@ -21,10 +21,11 @@ type Props = {
   error: boolean;
   onRetry: () => void;
   status: { latest_trade_date: string | null; is_stale: boolean; is_mock: boolean } | undefined;
+  timeframe: Timeframe;
+  onTimeframe: (timeframe: Timeframe) => void;
 };
 
-export function ChartWorkspace({ ticker, history, loading, fetching, error, onRetry, status }: Props) {
-  const [timeframe, setTimeframe] = useState<Timeframe>("6M");
+export function ChartWorkspace({ ticker, history, loading, fetching, error, onRetry, status, timeframe, onTimeframe }: Props) {
   const [enabledIndicators, setEnabledIndicators] = useState<Set<IndicatorId>>(
     () => new Set<IndicatorId>(["volume"]),
   );
@@ -48,7 +49,7 @@ export function ChartWorkspace({ ticker, history, loading, fetching, error, onRe
     <main className="chart-workspace">
       <SymbolHeader ticker={ticker} history={validHistory} loading={loading || fetching} />
       <div className="workspace-control-row">
-        <ChartToolbar timeframe={timeframe} onTimeframe={setTimeframe} enabledIndicators={enabledIndicators} onToggleIndicator={toggleIndicator} />
+        <ChartToolbar timeframe={timeframe} onTimeframe={onTimeframe} enabledIndicators={enabledIndicators} onToggleIndicator={toggleIndicator} />
         <div className="data-freshness" data-status={status?.is_stale ? "stale" : "current"}>
           <span className="data-freshness__dot" />
           <strong>{statusText}</strong>
@@ -60,7 +61,7 @@ export function ChartWorkspace({ ticker, history, loading, fetching, error, onRe
         {error ? <ChartState kind="error" onRetry={onRetry} /> : null}
         {!loading && !error && !hasData ? <ChartState kind="empty" /> : null}
         {!loading && !error && hasData && validHistory ? (
-          <MarketChart bars={validHistory.bars} timeframe={timeframe} frequencyAnalyzerEnabled={enabledIndicators.has("frequency-analyzer")} />
+          <MarketChart bars={validHistory.bars} timeframe={timeframe} enabledIndicators={enabledIndicators} />
         ) : null}
         {fetching && hasData ? (
           <div className="chart-refresh" role="status"><RefreshCw aria-hidden="true" size={13} /> Updating {ticker}</div>

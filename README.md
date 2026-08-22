@@ -22,7 +22,7 @@ uv sync --project apps/api
 
 Copy `.env.example` to `.env` and fill only the credentials available to the backend. Environment files are ignored by Git.
 
-For credential-free local development, set `MARKET_DATA_PROVIDER=mock` or leave `ZAPI_API_KEY` empty. The API uses deterministic in-memory fixtures and the UI displays `MOCK DATA` at all times.
+For credential-free local development, explicitly set `APP_ENV=development` and `MARKET_DATA_PROVIDER=mock`. The API uses deterministic in-memory fixtures and the UI displays `MOCK DATA` at all times. Selecting Zapi without `ZAPI_API_KEY` fails at startup; production and staging never fall back to mock data.
 
 Start the services in separate terminals:
 

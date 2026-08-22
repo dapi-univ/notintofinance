@@ -10,7 +10,7 @@ from app.schemas.api import (
     StockDetailResponse,
     StockListItemResponse,
 )
-from app.services.market import MarketService
+from app.services.market import HistoryTimeframe, MarketService
 
 router = APIRouter()
 Ticker = Annotated[str, Path(pattern=r"^[A-Za-z0-9]{1,12}$")]
@@ -44,7 +44,8 @@ async def history(
     ticker: Ticker,
     date_from: Annotated[date | None, Query(alias="from")] = None,
     date_to: Annotated[date | None, Query(alias="to")] = None,
-    limit: Annotated[int, Query(ge=1, le=2000)] = 520,
+    limit: Annotated[int | None, Query(ge=1, le=2000)] = None,
+    timeframe: HistoryTimeframe = HistoryTimeframe.SIX_MONTHS,
 ) -> HistoryResponse:
     if not re.fullmatch(r"[A-Za-z0-9]{1,12}", ticker):
         raise HTTPException(status_code=422, detail="Invalid ticker")
@@ -53,6 +54,7 @@ async def history(
         date_from=date_from,
         date_to=date_to,
         limit=limit,
+        timeframe=timeframe,
         as_of=date.today(),
     )
     if not result:

@@ -1,3 +1,5 @@
+import type { HistogramSeriesPartialOptions } from "lightweight-charts";
+
 import type { HistoryBar, Numberish } from "@/lib/api/types";
 import { toFrequencyAnalyzer, toVolume } from "@/lib/chart/adapter";
 import { formatCompact, toNumber } from "@/lib/format/market";
@@ -13,6 +15,14 @@ export type IndicatorDefinition = {
   normalization: string | null;
   transform: (bars: HistoryBar[]) => Array<{ time: string; value: number; color?: string }>;
   valueFormatter: (value: Numberish | null) => string;
+  rendering: {
+    seriesType: "histogram";
+    paneIndex: number;
+    paneLabel: string;
+    paneLabelClassName: string;
+    testId: string;
+    options: HistogramSeriesPartialOptions;
+  };
 };
 
 export const indicatorRegistry: Record<IndicatorId, IndicatorDefinition> = {
@@ -25,6 +35,18 @@ export const indicatorRegistry: Record<IndicatorId, IndicatorDefinition> = {
     normalization: null,
     transform: toVolume,
     valueFormatter: formatCompact,
+    rendering: {
+      seriesType: "histogram",
+      paneIndex: 1,
+      paneLabel: "VOLUME · SHARES",
+      paneLabelClassName: "pane-label--volume",
+      testId: "volume-pane",
+      options: {
+        priceFormat: { type: "volume" },
+        priceLineVisible: false,
+        lastValueVisible: false,
+      },
+    },
   },
   "frequency-analyzer": {
     id: "frequency-analyzer",
@@ -37,6 +59,19 @@ export const indicatorRegistry: Record<IndicatorId, IndicatorDefinition> = {
     valueFormatter: (value) => {
       const parsed = toNumber(value);
       return parsed === null ? "—" : parsed.toFixed(4);
+    },
+    rendering: {
+      seriesType: "histogram",
+      paneIndex: 2,
+      paneLabel: "FREQUENCY ANALYZER · LOG10(RAW SHARES)",
+      paneLabelClassName: "pane-label--frequency",
+      testId: "frequency-analyzer-pane",
+      options: {
+        color: "#e0a84b",
+        priceLineVisible: false,
+        lastValueVisible: true,
+        priceFormat: { type: "custom", formatter: (value: number) => value.toFixed(2) },
+      },
     },
   },
 };

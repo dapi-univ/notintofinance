@@ -12,5 +12,10 @@ describe("indicator registry", () => {
     expect(indicatorRegistry["frequency-analyzer"].normalization).toBe(
       "log10(raw shares)",
     );
+    expect(indicatorRegistry["frequency-analyzer"].rendering).toMatchObject({
+      seriesType: "histogram",
+      paneIndex: 2,
+      testId: "frequency-analyzer-pane",
+    });
   });
 });

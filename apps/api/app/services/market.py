@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from enum import StrEnum
 
 from app.analytics.frequency_analyzer import frequency_analyzer_raw
 from app.repositories.base import MarketRepository
@@ -18,6 +19,22 @@ def expected_latest_trade_date(as_of: date) -> date:
     while cursor.weekday() >= 5:
         cursor -= timedelta(days=1)
     return cursor
+
+
+class HistoryTimeframe(StrEnum):
+    ONE_MONTH = "1M"
+    THREE_MONTHS = "3M"
+    SIX_MONTHS = "6M"
+    ONE_YEAR = "1Y"
+    ALL = "ALL"
+
+
+TIMEFRAME_DAYS = {
+    HistoryTimeframe.ONE_MONTH: 31,
+    HistoryTimeframe.THREE_MONTHS: 93,
+    HistoryTimeframe.SIX_MONTHS: 186,
+    HistoryTimeframe.ONE_YEAR: 366,
+}
 
 
 class MarketService:
@@ -60,21 +77,28 @@ class MarketService:
         *,
         date_from: date | None,
         date_to: date | None,
-        limit: int,
+        limit: int | None,
+        timeframe: HistoryTimeframe,
         as_of: date,
     ) -> HistoryResponse | None:
         stock = await self._repository.get_stock(ticker)
         if not stock:
             return None
+        effective_from = date_from
+        if effective_from is None and timeframe is not HistoryTimeframe.ALL:
+            latest_available = date_to or await self._repository.latest_trade_date(ticker)
+            effective_from = (latest_available or as_of) - timedelta(
+                days=TIMEFRAME_DAYS[timeframe]
+            )
         bars = await self._repository.get_history(
-            ticker, date_from=date_from, date_to=date_to, limit=limit
+            ticker, date_from=effective_from, date_to=date_to, limit=limit
         )
         latest = bars[-1].trade_date if bars else None
         expected = expected_latest_trade_date(as_of)
         return HistoryResponse(
             ticker=stock.ticker,
             company_name=stock.company_name,
-            date_from=bars[0].trade_date if bars else date_from,
+            date_from=bars[0].trade_date if bars else effective_from,
             date_to=bars[-1].trade_date if bars else date_to,
             latest_trade_date=latest,
             is_stale=latest is None or latest < expected,

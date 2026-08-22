@@ -1,4 +1,5 @@
 import type { DataStatus, HistoryResponse, StockListItem } from "./types";
+import type { Timeframe } from "@/lib/chart/adapter";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -18,8 +19,13 @@ export function fetchStocks(signal?: AbortSignal): Promise<StockListItem[]> {
   return getJson("/stocks", signal);
 }
 
-export function fetchHistory(ticker: string, signal?: AbortSignal): Promise<HistoryResponse> {
-  return getJson(`/stocks/${encodeURIComponent(ticker)}/history?limit=520`, signal);
+export function fetchHistory(
+  ticker: string,
+  timeframe: Timeframe,
+  signal?: AbortSignal,
+): Promise<HistoryResponse> {
+  const query = new URLSearchParams({ timeframe });
+  return getJson(`/stocks/${encodeURIComponent(ticker)}/history?${query}`, signal);
 }
 
 export function fetchDataStatus(signal?: AbortSignal): Promise<DataStatus> {

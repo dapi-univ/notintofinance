@@ -16,9 +16,11 @@ class Settings(BaseSettings):
 
     @property
     def effective_provider(self) -> str:
-        if self.market_data_provider == "zapi" and not self.zapi_api_key:
-            return "mock"
-        return self.market_data_provider
+        return self.market_data_provider.strip().lower()
+
+    @property
+    def normalized_app_env(self) -> str:
+        return self.app_env.strip().lower()
 
     @property
     def parsed_cors_origins(self) -> list[str]:
