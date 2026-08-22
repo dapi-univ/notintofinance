@@ -22,6 +22,11 @@ const bars: HistoryBar[] = [
   },
 ];
 
+const theme = {
+  volumeUp: "rgba(10, 20, 30, 0.58)",
+  volumeDown: "rgba(40, 50, 60, 0.54)",
+};
+
 class FakeSeries {
   updates: unknown[][] = [];
 
@@ -44,6 +49,7 @@ describe("generic indicator series lifecycle", () => {
       bars,
       definitions: indicatorDefinitions,
       enabled: new Set<IndicatorId>(["volume"]),
+      theme,
       seriesById,
       createSeries,
       removeSeries,
@@ -54,6 +60,7 @@ describe("generic indicator series lifecycle", () => {
       bars,
       definitions: indicatorDefinitions,
       enabled: new Set<IndicatorId>(["volume", "frequency-analyzer"]),
+      theme,
       seriesById,
       createSeries,
       removeSeries,
@@ -62,6 +69,9 @@ describe("generic indicator series lifecycle", () => {
 
     expect(createdIds).toEqual(["volume", "frequency-analyzer"]);
     expect(volumeSeries?.updates).toHaveLength(2);
+    expect(volumeSeries?.updates[0]).toEqual([
+      { time: "2026-08-21", value: 3000, color: theme.volumeUp },
+    ]);
     expect(frequencySeries?.updates[0]).toEqual([
       { time: "2026-08-21", value: Math.log10(3) },
     ]);
@@ -70,6 +80,7 @@ describe("generic indicator series lifecycle", () => {
       bars,
       definitions: indicatorDefinitions,
       enabled: new Set<IndicatorId>(["volume"]),
+      theme,
       seriesById,
       createSeries,
       removeSeries,

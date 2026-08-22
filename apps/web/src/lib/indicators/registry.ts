@@ -6,6 +6,10 @@ import { formatCompact, toNumber } from "@/lib/format/market";
 
 export type IndicatorId = "volume" | "frequency-analyzer";
 export type IndicatorCategory = "market-data" | "analytics";
+export type IndicatorRenderTheme = {
+  volumeUp: string;
+  volumeDown: string;
+};
 
 export type IndicatorDefinition = {
   id: IndicatorId;
@@ -15,7 +19,7 @@ export type IndicatorDefinition = {
   defaultVisible: boolean;
   requires: Array<keyof HistoryBar>;
   normalization: string | null;
-  transform: (bars: HistoryBar[]) => Array<{ time: string; value: number; color?: string }>;
+  transform: (bars: HistoryBar[], theme: IndicatorRenderTheme) => Array<{ time: string; value: number; color?: string }>;
   valueFormatter: (value: Numberish | null) => string;
   rendering: {
     seriesType: "histogram";
@@ -42,7 +46,7 @@ export const indicatorRegistry: Record<IndicatorId, IndicatorDefinition> = {
     defaultVisible: true,
     requires: ["volume_shares"],
     normalization: null,
-    transform: toVolume,
+    transform: (bars, theme) => toVolume(bars, { up: theme.volumeUp, down: theme.volumeDown }),
     valueFormatter: formatCompact,
     rendering: {
       seriesType: "histogram",

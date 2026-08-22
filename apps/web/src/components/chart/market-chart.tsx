@@ -10,6 +10,7 @@ import {
   indicatorDefinitions,
   type IndicatorDefinition,
   type IndicatorId,
+  type IndicatorRenderTheme,
 } from "@/lib/indicators/registry";
 
 type Props = {
@@ -22,12 +23,28 @@ function cssColor(styles: CSSStyleDeclaration, token: string, fallback: string):
   return styles.getPropertyValue(token).trim() || fallback;
 }
 
+function colorWithOpacity(color: string, opacity: number): string {
+  const hex = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(color);
+  if (hex) {
+    const [, red, green, blue] = hex;
+    return `rgba(${Number.parseInt(red, 16)}, ${Number.parseInt(green, 16)}, ${Number.parseInt(blue, 16)}, ${opacity})`;
+  }
+
+  const rgb = /^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/i.exec(color);
+  return rgb ? `rgba(${rgb[1]}, ${rgb[2]}, ${rgb[3]}, ${opacity})` : color;
+}
+
 export function MarketChart({ bars, timeframe, enabledIndicators }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const histogramDefinitionRef = useRef<SeriesDefinition<"Histogram"> | null>(null);
   const indicatorSeriesRef = useRef(new Map<IndicatorId, ISeriesApi<"Histogram">>());
+  const indicatorThemeRef = useRef<IndicatorRenderTheme>({
+    volumeUp: "transparent",
+    volumeDown: "transparent",
+  });
+  const paneLabelRefs = useRef(new Map<"price" | IndicatorId, HTMLDivElement>());
   const [ready, setReady] = useState(false);
   const filteredBars = useMemo(() => filterBarsByTimeframe(bars, timeframe), [bars, timeframe]);
   const enabledDefinitions = useMemo(
@@ -52,6 +69,10 @@ export function MarketChart({ bars, timeframe, enabledIndicators }: Props) {
       const separatorHover = cssColor(styles, "--border-active", "#78613a");
       const marketUp = cssColor(styles, "--market-up", "#4f9f7d");
       const marketDown = cssColor(styles, "--market-down", "#c25b56");
+      indicatorThemeRef.current = {
+        volumeUp: colorWithOpacity(marketUp, 0.58),
+        volumeDown: colorWithOpacity(marketDown, 0.54),
+      };
       const chart = createChart(containerRef.current, {
         autoSize: false,
         layout: {
@@ -123,6 +144,7 @@ export function MarketChart({ bars, timeframe, enabledIndicators }: Props) {
       bars: filteredBars,
       definitions: indicatorDefinitions,
       enabled: enabledIndicators,
+      theme: indicatorThemeRef.current,
       seriesById: indicatorSeriesRef.current,
       createSeries: (definition: IndicatorDefinition) => {
         const styles = getComputedStyle(document.documentElement);
@@ -159,13 +181,61 @@ export function MarketChart({ bars, timeframe, enabledIndicators }: Props) {
     return () => cancelAnimationFrame(frame);
   }, [enabledDefinitions.length, ready]);
 
+  useEffect(() => {
+    if (!ready) return;
+
+    let frame = 0;
+    let paneObserver: ResizeObserver | null = null;
+    const updatePaneLabels = () => {
+      const chart = chartRef.current;
+      const container = containerRef.current;
+      if (!chart || !container) return;
+      const containerTop = container.getBoundingClientRect().top;
+
+      chart.panes().forEach((pane, index) => {
+        const labelId = index === 0 ? "price" : enabledDefinitions[index - 1]?.id;
+        const paneElement = pane.getHTMLElement();
+        const label = labelId ? paneLabelRefs.current.get(labelId) : undefined;
+        if (!paneElement || !label) return;
+        label.style.top = `${Math.round(paneElement.getBoundingClientRect().top - containerTop + 8)}px`;
+      });
+    };
+
+    frame = requestAnimationFrame(() => {
+      const paneElements = chartRef.current
+        ?.panes()
+        .map((pane) => pane.getHTMLElement())
+        .filter((element): element is HTMLElement => element !== null) ?? [];
+      paneObserver = new ResizeObserver(updatePaneLabels);
+      paneElements.forEach((element) => paneObserver?.observe(element));
+      updatePaneLabels();
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+      paneObserver?.disconnect();
+    };
+  }, [enabledDefinitions, ready]);
+
   return (
-    <div className={`market-chart ${enabledDefinitions.length > 1 ? "market-chart--with-fa" : ""}`} data-testid="market-chart">
+    <div className="market-chart" data-testid="market-chart">
       <div className="market-chart__pane-labels">
-        <div className="pane-label pane-label--price">PRICE · IDR</div>
+        <div
+          ref={(element) => {
+            if (element) paneLabelRefs.current.set("price", element);
+            else paneLabelRefs.current.delete("price");
+          }}
+          className="pane-label pane-label--price"
+        >
+          PRICE · IDR
+        </div>
         {enabledDefinitions.map((definition) => (
           <div
             key={definition.id}
+            ref={(element) => {
+              if (element) paneLabelRefs.current.set(definition.id, element);
+              else paneLabelRefs.current.delete(definition.id);
+            }}
             className={`pane-label ${definition.rendering.paneLabelClassName}`}
             data-testid={definition.rendering.testId}
           >

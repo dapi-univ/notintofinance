@@ -3,6 +3,11 @@ import { toNumber } from "@/lib/format/market";
 
 export type Timeframe = "1M" | "3M" | "6M" | "1Y" | "ALL";
 
+export type VolumeHistogramColors = {
+  up: string;
+  down: string;
+};
+
 const timeframeDays: Record<Exclude<Timeframe, "ALL">, number> = {
   "1M": 31,
   "3M": 93,
@@ -28,11 +33,11 @@ export function toCandles(bars: HistoryBar[]) {
   }));
 }
 
-export function toVolume(bars: HistoryBar[]) {
+export function toVolume(bars: HistoryBar[], colors: VolumeHistogramColors) {
   return bars.map((bar) => ({
     time: bar.date,
     value: bar.volume_shares,
-    color: Number(bar.close) >= Number(bar.open) ? "rgba(79, 159, 125, 0.58)" : "rgba(194, 91, 86, 0.54)",
+    color: Number(bar.close) >= Number(bar.open) ? colors.up : colors.down,
   }));
 }
 

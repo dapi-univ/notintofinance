@@ -318,9 +318,8 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="separat
 .chart-stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg-chart); }
 .market-chart, .market-chart__canvas { position: absolute; inset: 0; }
 .market-chart__canvas { min-height: 430px; }
-.market-chart__pane-labels { position: absolute; inset: 0 72px 24px 0; z-index: 4; display: grid; grid-template-rows: minmax(0, 3fr) minmax(0, 1fr); pointer-events: none; }
-.market-chart--with-fa .market-chart__pane-labels { grid-template-rows: minmax(0, 67fr) minmax(0, 14fr) minmax(0, 19fr); }
-.pane-label { align-self: start; justify-self: start; margin: 8px 0 0 10px; padding: 3px 5px; border: 1px solid color-mix(in srgb, var(--border-subtle) 82%, transparent); border-radius: 2px; background: color-mix(in srgb, var(--bg-chart) 88%, transparent); color: var(--text-muted); font-family: var(--font-numeric); font-size: 7px; font-weight: 600; letter-spacing: 0.09em; }
+.market-chart__pane-labels { position: absolute; inset: 0 72px 24px 0; z-index: 4; pointer-events: none; }
+.pane-label { position: absolute; top: 8px; left: 10px; padding: 3px 5px; border: 1px solid color-mix(in srgb, var(--border-subtle) 82%, transparent); border-radius: 2px; background: color-mix(in srgb, var(--bg-chart) 88%, transparent); color: var(--text-muted); font-family: var(--font-numeric); font-size: 7px; font-weight: 600; letter-spacing: 0.09em; }
 .pane-label--frequency { color: var(--accent); }
 .chart-refresh { position: absolute; top: 8px; right: 84px; z-index: 6; display: flex; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid var(--border-subtle); border-radius: 2px; background: color-mix(in srgb, var(--bg-chart) 92%, transparent); color: var(--text-muted); font-size: 8px; }
 .chart-refresh svg { animation: spin 1s linear infinite; }
@@ -356,7 +355,10 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="separat
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 1279px) {
-  .dashboard-shell { --watchlist-width: 270px; }
+  .dashboard-shell { grid-template-columns: 52px min(var(--watchlist-width), 270px) 5px minmax(0, 1fr); }
+  .dashboard-shell--collapsed { grid-template-columns: 52px minmax(0, 1fr); }
+  .watchlist__columns, .watchlist-item { grid-template-columns: minmax(78px, 1fr) 64px 72px; gap: 4px; padding-inline: 8px; }
+  .sparkline, .sparkline-empty { width: 64px; }
   .symbol-header { grid-template-columns: minmax(230px, 1fr) auto; gap: 16px; }
   .symbol-header__stats { display: none; }
 }

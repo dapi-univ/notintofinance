@@ -23,6 +23,23 @@ test("critical Dashboard V0 workspace flow", async ({ page }) => {
   await page.getByLabel("Frequency Analyzer").check();
   await expect(page.getByTestId("frequency-analyzer-pane")).toBeVisible();
 
+  const volumeLabel = page.getByTestId("volume-pane");
+  const volumeTopBeforeResize = await volumeLabel.evaluate((element) => element.getBoundingClientRect().top);
+  const firstPaneSeparator = page.locator(
+    '.market-chart__canvas div[style*="cursor: row-resize"][style*="height: 9px"]',
+  ).first();
+  const separatorBox = await firstPaneSeparator.boundingBox();
+  expect(separatorBox).not.toBeNull();
+  if (separatorBox) {
+    await page.mouse.move(separatorBox.x + separatorBox.width / 2, separatorBox.y + separatorBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(separatorBox.x + separatorBox.width / 2, separatorBox.y + separatorBox.height / 2 + 48, { steps: 6 });
+    await page.mouse.up();
+  }
+  await expect.poll(async () => volumeLabel.evaluate((element) => element.getBoundingClientRect().top)).toBeGreaterThan(
+    volumeTopBeforeResize + 40,
+  );
+
   const allHistoryRequest = page.waitForResponse((response) =>
     response.url().includes("/stocks/ANTM/history?timeframe=ALL"),
   );
@@ -37,4 +54,22 @@ test("critical Dashboard V0 workspace flow", async ({ page }) => {
   await page.reload();
   await expect(page.getByTestId("active-ticker")).toHaveText("ANTM");
   await expect(page.getByTestId("market-chart")).toBeVisible();
+});
+
+test("narrow desktop watchlist keeps all quote columns within its panel", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await page.goto("/app");
+
+  const watchlist = page.locator(".watchlist");
+  await expect(watchlist).toBeVisible();
+  const metrics = await watchlist.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    rowOverflows: Array.from(element.querySelectorAll<HTMLElement>(".watchlist-item")).some(
+      (row) => row.scrollWidth > row.clientWidth,
+    ),
+  }));
+
+  expect(metrics.scrollWidth).toBe(metrics.clientWidth);
+  expect(metrics.rowOverflows).toBe(false);
 });

@@ -1,5 +1,5 @@
 import type { HistoryBar } from "@/lib/api/types";
-import type { IndicatorDefinition, IndicatorId } from "@/lib/indicators/registry";
+import type { IndicatorDefinition, IndicatorId, IndicatorRenderTheme } from "@/lib/indicators/registry";
 
 export type IndicatorSeries = {
   setData: (data: ReturnType<IndicatorDefinition["transform"]>) => void;
@@ -9,6 +9,7 @@ type SyncIndicatorSeriesOptions<TSeries extends IndicatorSeries> = {
   bars: HistoryBar[];
   definitions: IndicatorDefinition[];
   enabled: ReadonlySet<IndicatorId>;
+  theme: IndicatorRenderTheme;
   seriesById: Map<IndicatorId, TSeries>;
   createSeries: (definition: IndicatorDefinition) => TSeries;
   removeSeries: (series: TSeries) => void;
@@ -18,6 +19,7 @@ export function syncIndicatorSeries<TSeries extends IndicatorSeries>({
   bars,
   definitions,
   enabled,
+  theme,
   seriesById,
   createSeries,
   removeSeries,
@@ -36,6 +38,6 @@ export function syncIndicatorSeries<TSeries extends IndicatorSeries>({
       series = createSeries(definition);
       seriesById.set(definition.id, series);
     }
-    series.setData(definition.transform(bars));
+    series.setData(definition.transform(bars, theme));
   }
 }
