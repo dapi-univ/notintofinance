@@ -34,6 +34,13 @@ class MicrostructureSymbolResult:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class ComparisonOutcome:
+    comparable: bool
+    mismatch: bool
+    detail: dict[str, int] | None = None
+
+
 class PluangIngestionService:
     def __init__(self, provider: PluangProvider, repository: PostgresWarehouseRepository) -> None:
         self._provider = provider
@@ -142,16 +149,20 @@ class PluangIngestionService:
                 mismatches.append("broker-summary-blocked")
             else:
                 broker_rows, _ = await self._provider.get_broker_summary(ticker, trade_date)
-                broker_mismatch = compare_existing and await self._broker_mismatch(
-                    ticker, trade_date, broker_rows
+                broker_comparison = (
+                    await self._compare_broker_flow(ticker, trade_date, broker_rows)
+                    if compare_existing
+                    else None
                 )
-                if broker_mismatch:
+                if broker_comparison and broker_comparison.mismatch:
                     mismatches.append("broker-summary")
                     await self._record_comparison_mismatch(
                         ticker, "broker-summary", len(broker_rows)
                     )
-                else:
+                elif not compare_existing:
                     await self._repository.upsert_broker_flow(broker_rows)
+                elif broker_comparison and broker_comparison.comparable:
+                    await self._resolve_comparison_block(ticker, "broker-summary")
 
             trade_rows: list[TradePrintRecord] = []
             pages = 0
@@ -214,20 +225,22 @@ class PluangIngestionService:
                 raise ValueError("duplicate trade sequence across Pluang pages")
             normalized_trades = list(deduplicated.values())
             trade_comparison = (
-                await self._trade_mismatch(ticker, trade_date, normalized_trades)
+                await self._compare_trades(ticker, trade_date, normalized_trades)
                 if compare_existing
                 else None
             )
-            if trade_comparison:
+            if trade_comparison and trade_comparison.mismatch:
                 mismatches.append("running-trades")
                 await self._record_comparison_mismatch(
                     ticker,
                     "running-trades",
                     len(normalized_trades),
-                    comparison=trade_comparison,
+                    comparison=trade_comparison.detail,
                 )
-            elif not trades_blocked:
+            elif not compare_existing and not trades_blocked:
                 await self._repository.upsert_trade_prints(normalized_trades)
+            elif trade_comparison and trade_comparison.comparable:
+                await self._resolve_comparison_block(ticker, "running-trades")
 
             orderbook_levels = 0
             orderbook_blocked = (
@@ -243,16 +256,20 @@ class PluangIngestionService:
             else:
                 snapshot, _ = await self._provider.get_orderbook(ticker)
                 orderbook_levels = len(snapshot.levels)
-                orderbook_mismatch = compare_existing and await self._orderbook_mismatch(
-                    ticker, snapshot
+                orderbook_comparison = (
+                    await self._compare_orderbook(ticker, snapshot)
+                    if compare_existing
+                    else None
                 )
-                if orderbook_mismatch:
+                if orderbook_comparison and orderbook_comparison.mismatch:
                     mismatches.append("orderbook")
                     await self._record_comparison_mismatch(
                         ticker, "orderbook", len(snapshot.levels)
                     )
-                else:
+                elif not compare_existing:
                     await self._repository.insert_orderbook_snapshot(snapshot)
+                elif orderbook_comparison and orderbook_comparison.comparable:
+                    await self._resolve_comparison_block(ticker, "orderbook")
             result_status = (
                 "blocked"
                 if any(item.endswith("-blocked") for item in mismatches)
@@ -297,19 +314,20 @@ class PluangIngestionService:
                 )
             return MicrostructureSymbolResult(ticker, 0, 0, 0, 0, "failed", message)
 
-    async def _broker_mismatch(
+    async def _compare_broker_flow(
         self, ticker: str, trade_date: date, incoming: list[BrokerFlowRecord]
-    ) -> bool:
+    ) -> ComparisonOutcome:
         existing = await self._repository.broker_flow(ticker, trade_date, trade_date)
         if not existing:
-            return False
-        return {_broker_signature(row) for row in existing} != {
+            return ComparisonOutcome(comparable=False, mismatch=False)
+        mismatch = {_broker_signature(row) for row in existing} != {
             _broker_signature(row) for row in incoming
         }
+        return ComparisonOutcome(comparable=True, mismatch=mismatch)
 
-    async def _trade_mismatch(
+    async def _compare_trades(
         self, ticker: str, trade_date: date, incoming: list[TradePrintRecord]
-    ) -> dict[str, int] | None:
+    ) -> ComparisonOutcome:
         existing = await self._repository.trades_by_sequences(
             ticker,
             trade_date,
@@ -332,18 +350,21 @@ class PluangIngestionService:
             mismatch_counts["lots"] += row.lots != record.lots
             mismatch_counts["shares"] += row.shares != record.shares
             mismatch_counts["action"] += row.aggressor_action != record.aggressor_action
-        if not any(mismatch_counts.values()):
-            return None
-        return {"overlap": len(existing), **mismatch_counts}
+        detail = {"overlap": len(existing), **mismatch_counts}
+        return ComparisonOutcome(
+            comparable=bool(incoming) and len(existing) == len(incoming),
+            mismatch=any(mismatch_counts.values()),
+            detail=detail,
+        )
 
-    async def _orderbook_mismatch(
+    async def _compare_orderbook(
         self, ticker: str, incoming: OrderbookSnapshotRecord
-    ) -> bool:
+    ) -> ComparisonOutcome:
         existing = await self._repository.latest_orderbook(ticker)
         if not existing:
-            return False
+            return ComparisonOutcome(comparable=False, mismatch=False)
         snapshot, levels = existing
-        return (
+        mismatch = (
             snapshot.best_bid,
             snapshot.best_ask,
             snapshot.spread,
@@ -354,6 +375,7 @@ class PluangIngestionService:
             incoming.spread,
             {(level.side, level.level_rank, level.price) for level in incoming.levels},
         )
+        return ComparisonOutcome(comparable=True, mismatch=mismatch)
 
     async def _record_comparison_mismatch(
         self,
@@ -376,6 +398,14 @@ class PluangIngestionService:
                 "incoming_rows": incoming_rows,
                 "comparison": comparison or {},
             },
+        )
+
+    async def _resolve_comparison_block(self, ticker: str, dataset: str) -> None:
+        await self._repository.resolve_quality_event(
+            ticker=ticker,
+            provider="pluang",
+            dataset=f"finance:pluang/{dataset}",
+            reason_code="gateway_source_comparison_mismatch",
         )
 
     async def _record_mapping_failure(

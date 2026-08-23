@@ -4,8 +4,8 @@
     "count": 2,
     "fetched": 2,
     "items": [
-      {"action": "SELL", "lots": 29, "price": 6425, "sequence": 23034, "time": "15:49:58"},
-      {"action": "BUY", "lots": 1, "price": 6450, "sequence": 23033, "time": "15:49:58"}
+      {"action": "SELL", "lots": 29, "price": 6425, "sequence": "FIXTURE-BBCA-002", "time": "15:49:58"},
+      {"action": "BUY", "lots": 1, "price": 6450, "sequence": "FIXTURE-BBCA-001", "time": "15:49:58"}
     ],
     "nextCursor": "MjI2OTQ=",
     "source": "pluang",

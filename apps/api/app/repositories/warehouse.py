@@ -4,11 +4,11 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import and_, delete, func, select, tuple_
+from sqlalchemy import and_, delete, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import Database
+from app.db.session import Database, UnsafeDatabaseTarget
 from app.models.market import DailyMarketData, Stock
 from app.models.warehouse import (
     BrokerFlowDaily,
@@ -250,6 +250,10 @@ class PostgresWarehouseRepository:
     async def upsert_trade_prints(self, records: list[TradePrintRecord]) -> tuple[int, int]:
         if not records:
             return 0, 0
+        if self._database.is_managed_supabase and any(
+            _is_synthetic_identity(record.provider_sequence) for record in records
+        ):
+            raise UnsafeDatabaseTarget("synthetic trade identities cannot be written to Supabase")
         async with self._database.session() as session, session.begin():
             stock_id = await self._stock_id(session, records[0].ticker)
             identities = [(record.trade_date, record.provider_sequence) for record in records]
@@ -444,6 +448,31 @@ class PostgresWarehouseRepository:
                 )
             )
 
+    async def resolve_quality_event(
+        self,
+        *,
+        ticker: str,
+        provider: str,
+        dataset: str,
+        reason_code: str,
+    ) -> int:
+        async with self._database.session() as session, session.begin():
+            stock_id = await self._stock_id(session, ticker)
+            result = await session.scalars(
+                update(DataQualityEvent)
+                .where(
+                    DataQualityEvent.stock_id == stock_id,
+                    DataQualityEvent.provider == provider,
+                    DataQualityEvent.dataset == dataset,
+                    DataQualityEvent.reason_code == reason_code,
+                    DataQualityEvent.is_terminal,
+                    DataQualityEvent.resolved_at.is_(None),
+                )
+                .values(resolved_at=func.now())
+                .returning(DataQualityEvent.id)
+            )
+            return len(result.all())
+
     @asynccontextmanager
     async def advisory_lock(self, lock_name: str) -> AsyncIterator[None]:
         async with self._database.session() as session:
@@ -600,3 +629,8 @@ def _sanitize(value: object) -> object:
     if isinstance(value, list):
         return [_sanitize(item) for item in value]
     return value
+
+
+def _is_synthetic_identity(value: str) -> bool:
+    normalized = value.strip().upper()
+    return normalized.startswith(("FIXTURE-", "SYNTHETIC-", "TEST-"))

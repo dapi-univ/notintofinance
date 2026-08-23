@@ -49,8 +49,15 @@ uv run --project apps/api python -m app.warehouse_cli canary AADI BBCA TLKM --ma
 
 The session date defaults to the latest confirmed EOD date in PostgreSQL. The comparison
 canary reads one page from the start without replacing the previously persisted continuation
-cursor. Ordinary bounded runs resume the stored Zapi `nextCursor`; reaching the page cap with
-a remaining cursor exits as `partial`, never `running`. An unresolved terminal comparison
-event blocks only its affected dataset during ordinary runs; use `--compare-existing` to
-perform a bounded re-check after review. Do not increase the three-symbol, three-page or
-30-request Phase 1 boundary before audit approval.
+cursor or writing normalized warehouse facts. A successful full-overlap comparison resolves
+only its matching unresolved comparison event. Ordinary bounded runs resume the stored Zapi
+`nextCursor`; reaching the page cap with a remaining cursor exits as `partial`, never
+`running`. An unresolved terminal comparison event blocks only its affected dataset during
+ordinary runs; use `--compare-existing` to perform a bounded re-check after review. Do not
+increase the three-symbol, three-page or 30-request Phase 1 boundary before audit approval.
+
+## Test database safety
+
+Pytest processes cannot construct a `Database` for a managed Supabase hostname. PostgreSQL
+tests must use an isolated local database or mocks. Synthetic trade identities beginning with
+`FIXTURE-`, `SYNTHETIC-`, or `TEST-` are also rejected by managed-Supabase repository writes.

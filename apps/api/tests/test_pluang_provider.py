@@ -38,7 +38,7 @@ def test_running_trades_maps_sequence_action_lots_and_next_cursor() -> None:
     )
 
     assert page.next_cursor == "MjI2OTQ="
-    assert page.records[0].provider_sequence == "23034"
+    assert page.records[0].provider_sequence == "FIXTURE-BBCA-002"
     assert page.records[0].lots == 29
     assert page.records[0].shares == 2900
     assert page.records[0].executed_at.utcoffset().total_seconds() == 7 * 3600
