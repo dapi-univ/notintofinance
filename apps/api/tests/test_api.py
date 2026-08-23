@@ -24,6 +24,7 @@ def test_dashboard_api_data_flow() -> None:
     assert history.json()["ticker"] == "BBCA"
     assert history.json()["bars"][0]["frequency_analyzer_raw_shares"] is not None
     assert status.json()["is_mock"] is True
+    assert status.json()["last_successful_ingestion"]["status"] == "succeeded"
 
 
 def test_unknown_ticker_returns_404() -> None:
@@ -53,4 +54,31 @@ def test_history_timeframes_are_bounded_or_return_all_available_data() -> None:
         "volume_shares",
         "frequency",
         "frequency_analyzer_raw_shares",
+        "foreign_buy_shares",
+        "foreign_sell_shares",
+        "foreign_net_shares",
+        "cumulative_foreign_net_shares",
     }
+
+
+def test_stock_search_filters_active_universe() -> None:
+    app = create_app(Settings(app_env="test", market_data_provider="mock", database_url=None))
+    with TestClient(app) as client:
+        response = client.get("/stocks?q=telkom&limit=10")
+
+    assert response.status_code == 200
+    assert [stock["ticker"] for stock in response.json()] == ["TLKM"]
+
+
+def test_foreign_net_and_cumulative_values_are_derived_from_stored_shares() -> None:
+    app = create_app(Settings(app_env="test", market_data_provider="mock", database_url=None))
+    with TestClient(app) as client:
+        response = client.get("/stocks/BBCA/history?timeframe=1M")
+
+    bars = response.json()["bars"]
+    running = 0
+    for bar in bars:
+        expected_net = bar["foreign_buy_shares"] - bar["foreign_sell_shares"]
+        running += expected_net
+        assert bar["foreign_net_shares"] == expected_net
+        assert bar["cumulative_foreign_net_shares"] == running

@@ -18,10 +18,24 @@ When `DATABASE_URL` or `ZAPI_API_KEY` is unavailable, development starts with th
 - Client UI state: ticker, timeframe, watchlist width/collapse, indicator visibility.
 - The selected ticker is persisted in the `/app?ticker=...` URL.
 
-## Frequency Analyzer
+## EOD operations
+
+The `securities` dataset synchronizes the active stock universe. Per-ticker history uses a
+bounded worker pool, recent-window refreshes, idempotent database upserts, and private
+checkpoints. One ticker failure is recorded without rolling back other completed symbols.
+Normal API reads do not instantiate or call the provider.
+
+## Analytics
 
 Raw values are calculated in the API as `volume / frequency^3`. Share and lot research series are returned separately. The frontend registry applies an explicitly named `log10(raw shares)` visualization transform without overwriting either raw series.
 
+Foreign buy and sell shares are stored as supplied. Daily net shares and cumulative net
+shares for the selected chart range are derived in the API and rendered by the existing
+registry-driven chart lifecycle.
+
 ## Database access
 
-FastAPI uses a pooled server-side PostgreSQL connection. The browser never receives database credentials. Public-schema tables have RLS enabled and browser roles have no grants; V0 does not use Supabase Auth, Storage, Realtime, or Edge Functions.
+FastAPI uses a pooled server-side PostgreSQL connection. The browser never receives database
+credentials. Public-schema tables, including `alembic_version`, have RLS enabled and browser
+roles have no grants; the application does not use Supabase Auth, Storage, Realtime, or Edge
+Functions.

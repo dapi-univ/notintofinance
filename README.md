@@ -1,8 +1,11 @@
 # OLT — IDX EOD Research Terminal
 
-Dashboard V0 is a desktop-first Indonesian equities workspace with a thin navigation rail, searchable and resizable watchlist, mini sparklines, a synchronized candlestick/volume chart, and the Frequency Analyzer research pane.
+KEJORA is a desktop-first Indonesian equities workspace with a thin navigation rail,
+searchable and resizable database-backed stock universe, mini sparklines, synchronized
+price/volume charts, Frequency Analyzer, and share-based Foreign Analysis.
 
-Only Dashboard V0 is implemented. There is no landing page, authentication, billing, portfolio, screener, real-time stream, or future analytics module.
+The EOD operational slice is implemented. There is no landing page, authentication,
+billing, portfolio, screener, real-time stream, broker analytics, or intraday collector.
 
 ## Stack
 
@@ -35,7 +38,10 @@ Open `http://localhost:3000/app`.
 
 ## Supabase PostgreSQL
 
-The authoritative schema is [the Dashboard V0 migration](supabase/migrations/20260822154827_dashboard_v0.sql). It creates `stocks`, `daily_market_data`, and `ingestion_runs`, including validation constraints, idempotency keys, indexes, RLS, and browser-role revocations.
+The authoritative schema is the ordered SQL history in `supabase/migrations`. It creates
+`stocks`, `daily_market_data`, `ingestion_runs`, and private resumable
+`ingestion_checkpoints`, including validation constraints, idempotency keys, indexes, RLS,
+and browser-role revocations.
 
 After connecting the Supabase CLI to the intended project:
 
@@ -46,7 +52,8 @@ npx supabase db push
 npx supabase migration list
 ```
 
-Set `DATABASE_URL` to a server-side Supabase transaction-pooler URL for the API. Never prefix database credentials or a service-role key with `NEXT_PUBLIC_`.
+Set `DATABASE_URL` to a server-side Supabase pooler URL for the API. Never prefix database
+credentials or a service-role key with `NEXT_PUBLIC_`.
 
 Alembic is available for non-Supabase deployment workflows and executes the same authoritative SQL file:
 
@@ -58,7 +65,8 @@ Use one migration history mechanism per environment; managed Supabase deployment
 
 ## Zapi ingestion
 
-Zapi uses the documented `finance:idx/stock-history` and `stock-summary` endpoints. Configure:
+Zapi uses the verified `finance:idx/securities` and `finance:idx/stock-history` endpoints.
+See [the sanitized data inventory](docs/ZAPI_EOD_DATA_INVENTORY.md). Configure:
 
 ```dotenv
 DATABASE_URL=postgresql://...
@@ -67,13 +75,31 @@ ZAPI_API_KEY=zpi_...
 ZAPI_BASE_URL=https://api.zpi.web.id/v1/finance:idx
 ```
 
-Then ingest one or more symbols:
+Discover without writing, synchronize the universe, or run selected symbols:
 
 ```bash
-uv run --project apps/api python -m app.cli BBCA ANTM TLKM --from 2025-01-01 --to 2026-08-21
+uv run --project apps/api python -m app.cli --discover-only
+uv run --project apps/api python -m app.cli --sync-universe-only
+uv run --project apps/api python -m app.cli BBCA ANTM TLKM --mode auto --concurrency 2
 ```
 
-Ingestion validates source data and atomically upserts `(stock_id, trade_date)`. Volume remains in shares. Lots are derived as shares divided by 100.
+Initial backfill and incremental refresh are also explicit:
+
+```bash
+uv run --project apps/api python -m app.cli BBRI BMRI --mode backfill --sessions 260
+uv run --project apps/api python -m app.cli --all-active --mode auto --concurrency 2
+```
+
+Resume only failed checkpoints without spending another universe request:
+
+```bash
+uv run --project apps/api python -m app.cli --resume --mode auto --concurrency 2 --skip-universe-sync
+```
+
+Ingestion validates source data, isolates ticker failures, and atomically upserts
+`(stock_id, trade_date)`. A successful second execution is idempotent; complete histories
+only re-fetch a 14-day revision window. Volume remains in shares. Lots are derived as shares
+divided by 100.
 
 ## Frequency Analyzer
 
@@ -96,12 +122,15 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-The frontend suite executes the PostgreSQL migration in PGlite and checks its uniqueness contract. Backend tests cover formula examples, invalid OHLC rejection, Zapi mapping, duplicate ingestion, freshness, and the API data flow. Playwright covers the complete `/app` workspace flow.
+The frontend suite executes the PostgreSQL migration in PGlite and checks its uniqueness
+contract. Backend tests cover formula examples, invalid OHLC filtering, both Zapi envelopes,
+universe synchronization, resumable ingestion, foreign calculations, freshness, and API
+data flow. Playwright covers ticker discovery and all operational EOD panes.
 
 ## API
 
 - `GET /health`
-- `GET /stocks`
+- `GET /stocks?q={ticker-or-company}&limit={1..1000}`
 - `GET /stocks/{ticker}`
 - `GET /stocks/{ticker}/history`
 - `GET /data/status`

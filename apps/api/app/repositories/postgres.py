@@ -1,11 +1,11 @@
 from datetime import UTC, date, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import Database
-from app.models.market import DailyMarketData, IngestionRun, Stock
-from app.repositories.base import IngestionStatus, StockSnapshot
+from app.models.market import DailyMarketData, IngestionCheckpoint, IngestionRun, Stock
+from app.repositories.base import HistoryState, IngestionStatus, StockSnapshot
 from app.schemas.domain import MarketBar, StockIdentity
 
 
@@ -15,9 +15,15 @@ class PostgresMarketRepository:
     def __init__(self, database: Database):
         self._database = database
 
-    async def list_stocks(self) -> list[StockSnapshot]:
+    async def list_stocks(self, query: str | None = None) -> list[StockSnapshot]:
         async with self._database.session() as session:
-            stocks = list((await session.scalars(select(Stock).where(Stock.is_active))).all())
+            statement = select(Stock).where(Stock.is_active)
+            if query and query.strip():
+                pattern = f"%{query.strip()}%"
+                statement = statement.where(
+                    Stock.ticker.ilike(pattern) | Stock.company_name.ilike(pattern)
+                )
+            stocks = list((await session.scalars(statement)).all())
             if not stocks:
                 return []
             ranked = (
@@ -56,6 +62,50 @@ class PostgresMarketRepository:
                 )
             )
         return output
+
+    async def sync_stock_universe(
+        self, stocks: list[StockIdentity], *, deactivate_missing: bool
+    ) -> tuple[int, int, int]:
+        if not stocks:
+            return 0, 0, 0
+        tickers = [stock.ticker for stock in stocks]
+        async with self._database.session() as session, session.begin():
+            existing = set(
+                (await session.scalars(select(Stock.ticker).where(Stock.ticker.in_(tickers)))).all()
+            )
+            values = [
+                {
+                    "ticker": stock.ticker,
+                    "company_name": stock.company_name,
+                    "sector": stock.sector,
+                    "subsector": stock.subsector,
+                    "is_active": True,
+                }
+                for stock in stocks
+            ]
+            statement = pg_insert(Stock).values(values)
+            await session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[Stock.ticker],
+                    set_={
+                        "company_name": statement.excluded.company_name,
+                        "sector": statement.excluded.sector,
+                        "subsector": statement.excluded.subsector,
+                        "is_active": True,
+                        "updated_at": func.now(),
+                    },
+                )
+            )
+            deactivated = 0
+            if deactivate_missing:
+                result = await session.execute(
+                    update(Stock)
+                    .where(Stock.is_active, Stock.ticker.not_in(tickers))
+                    .values(is_active=False, updated_at=func.now())
+                )
+                deactivated = result.rowcount  # type: ignore[attr-defined]
+        inserted = len(set(tickers) - existing)
+        return inserted, len(stocks) - inserted, deactivated
 
     async def get_stock(self, ticker: str) -> StockIdentity | None:
         async with self._database.session() as session:
@@ -147,6 +197,105 @@ class PostgresMarketRepository:
                 )
             return await session.scalar(statement)
 
+    async def history_state(self, ticker: str) -> HistoryState:
+        async with self._database.session() as session:
+            row = (
+                await session.execute(
+                    select(
+                        func.count(DailyMarketData.id),
+                        func.max(DailyMarketData.trade_date),
+                    )
+                    .join(Stock, Stock.id == DailyMarketData.stock_id)
+                    .where(Stock.ticker == ticker.upper())
+                )
+            ).one()
+            return HistoryState(int(row[0]), row[1])
+
+    async def update_checkpoint(
+        self,
+        ticker: str,
+        *,
+        provider: str,
+        dataset: str,
+        status: str,
+        last_successful_trade_date: date | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        async with self._database.session() as session, session.begin():
+            stock_id = await session.scalar(select(Stock.id).where(Stock.ticker == ticker.upper()))
+            if stock_id is None:
+                raise LookupError(f"stock {ticker.upper()} not found")
+            successful_at = datetime.now(UTC) if status == "succeeded" else None
+            statement = pg_insert(IngestionCheckpoint).values(
+                provider=provider,
+                dataset=dataset,
+                stock_id=stock_id,
+                last_successful_trade_date=last_successful_trade_date,
+                last_successful_fetch_at=successful_at,
+                last_run_status=status,
+                error_message=error_message[:1000] if error_message else None,
+            )
+            update_values: dict[str, object] = {
+                "last_run_status": status,
+                "error_message": error_message[:1000] if error_message else None,
+                "updated_at": func.now(),
+            }
+            if status == "succeeded":
+                update_values.update(
+                    last_successful_trade_date=last_successful_trade_date,
+                    last_successful_fetch_at=successful_at,
+                )
+            await session.execute(
+                statement.on_conflict_do_update(
+                    constraint="ingestion_checkpoints_identity_key",
+                    set_=update_values,
+                )
+            )
+
+    async def checkpoint_tickers(self, *, provider: str, dataset: str, status: str) -> list[str]:
+        async with self._database.session() as session:
+            return list(
+                (
+                    await session.scalars(
+                        select(Stock.ticker)
+                        .join(IngestionCheckpoint, IngestionCheckpoint.stock_id == Stock.id)
+                        .where(
+                            IngestionCheckpoint.provider == provider,
+                            IngestionCheckpoint.dataset == dataset,
+                            IngestionCheckpoint.last_run_status == status,
+                            Stock.is_active,
+                        )
+                        .order_by(Stock.ticker)
+                    )
+                ).all()
+            )
+
+    async def resumable_tickers(self, *, provider: str, dataset: str) -> list[str]:
+        async with self._database.session() as session:
+            return list(
+                (
+                    await session.scalars(
+                        select(Stock.ticker)
+                        .outerjoin(
+                            IngestionCheckpoint,
+                            and_(
+                                IngestionCheckpoint.stock_id == Stock.id,
+                                IngestionCheckpoint.provider == provider,
+                                IngestionCheckpoint.dataset == dataset,
+                            ),
+                        )
+                        .where(
+                            Stock.is_active,
+                            or_(
+                                IngestionCheckpoint.id.is_(None),
+                                IngestionCheckpoint.last_run_status.in_(["failed", "running"]),
+                            ),
+                        )
+                        .order_by(Stock.ticker)
+                    )
+                ).all()
+            )
+
     async def start_ingestion(self, provider: str, requested_date: date | None) -> int:
         async with self._database.session() as session, session.begin():
             run = IngestionRun(provider=provider, status="running", requested_date=requested_date)
@@ -175,11 +324,12 @@ class PostgresMarketRepository:
             run.rows_updated = rows_updated
             run.error_message = error_message[:1000] if error_message else None
 
-    async def latest_ingestion(self) -> IngestionStatus | None:
+    async def latest_ingestion(self, *, successful_only: bool = False) -> IngestionStatus | None:
         async with self._database.session() as session:
-            run = await session.scalar(
-                select(IngestionRun).order_by(IngestionRun.started_at.desc()).limit(1)
-            )
+            statement = select(IngestionRun)
+            if successful_only:
+                statement = statement.where(IngestionRun.status == "succeeded")
+            run = await session.scalar(statement.order_by(IngestionRun.started_at.desc()).limit(1))
             if not run:
                 return None
             return IngestionStatus(run.provider, run.status, run.finished_at, run.rows_received)

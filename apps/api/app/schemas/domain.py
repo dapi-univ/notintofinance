@@ -43,3 +43,9 @@ class MarketBar(BaseModel):
 class ProviderHistory(BaseModel):
     stock: StockIdentity
     bars: list[MarketBar]
+    rejected_items: int = Field(default=0, ge=0)
+
+
+class ProviderUniverse(BaseModel):
+    stocks: list[StockIdentity]
+    total: int = Field(ge=0)

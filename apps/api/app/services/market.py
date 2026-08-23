@@ -43,13 +43,14 @@ class MarketService:
         self._provider = provider
         self._is_mock = is_mock
 
-    async def list_stocks(self) -> list[StockListItemResponse]:
-        snapshots = await self._repository.list_stocks()
+    async def list_stocks(self, query: str | None = None) -> list[StockListItemResponse]:
+        snapshots = await self._repository.list_stocks(query)
         return [
             StockListItemResponse(
                 ticker=item.stock.ticker,
                 company_name=item.stock.company_name,
                 sector=item.stock.sector,
+                subsector=item.stock.subsector,
                 latest_close=item.latest_close,
                 change=(item.latest_close - item.previous)
                 if item.latest_close is not None and item.previous is not None
@@ -63,6 +64,7 @@ class MarketService:
                 ),
                 latest_trade_date=item.latest_trade_date,
                 sparkline=item.sparkline,
+                has_history=item.latest_trade_date is not None,
             )
             for item in snapshots
         ]
@@ -87,24 +89,25 @@ class MarketService:
         effective_from = date_from
         if effective_from is None and timeframe is not HistoryTimeframe.ALL:
             latest_available = date_to or await self._repository.latest_trade_date(ticker)
-            effective_from = (latest_available or as_of) - timedelta(
-                days=TIMEFRAME_DAYS[timeframe]
-            )
+            effective_from = (latest_available or as_of) - timedelta(days=TIMEFRAME_DAYS[timeframe])
         bars = await self._repository.get_history(
             ticker, date_from=effective_from, date_to=date_to, limit=limit
         )
         latest = bars[-1].trade_date if bars else None
         expected = expected_latest_trade_date(as_of)
-        return HistoryResponse(
-            ticker=stock.ticker,
-            company_name=stock.company_name,
-            date_from=bars[0].trade_date if bars else effective_from,
-            date_to=bars[-1].trade_date if bars else date_to,
-            latest_trade_date=latest,
-            is_stale=latest is None or latest < expected,
-            is_mock=self._is_mock,
-            source=self._provider,
-            bars=[
+        cumulative_foreign_net = 0
+        response_bars: list[HistoryBarResponse] = []
+        for bar in bars:
+            foreign_net = (
+                bar.foreign_buy_shares - bar.foreign_sell_shares
+                if bar.foreign_buy_shares is not None and bar.foreign_sell_shares is not None
+                else None
+            )
+            cumulative = None
+            if foreign_net is not None:
+                cumulative_foreign_net += foreign_net
+                cumulative = cumulative_foreign_net
+            response_bars.append(
                 HistoryBarResponse(
                     date=bar.trade_date,
                     open=bar.open,
@@ -122,14 +125,28 @@ class MarketService:
                     frequency_analyzer_raw_lots=frequency_analyzer_raw(
                         bar.volume_shares, bar.frequency, unit="lots"
                     ),
+                    foreign_buy_shares=bar.foreign_buy_shares,
+                    foreign_sell_shares=bar.foreign_sell_shares,
+                    foreign_net_shares=foreign_net,
+                    cumulative_foreign_net_shares=cumulative,
                 )
-                for bar in bars
-            ],
+            )
+        return HistoryResponse(
+            ticker=stock.ticker,
+            company_name=stock.company_name,
+            date_from=bars[0].trade_date if bars else effective_from,
+            date_to=bars[-1].trade_date if bars else date_to,
+            latest_trade_date=latest,
+            is_stale=latest is None or latest < expected,
+            is_mock=self._is_mock,
+            source=self._provider,
+            bars=response_bars,
         )
 
     async def get_status(self, *, as_of: date) -> DataStatusResponse:
         latest = await self._repository.latest_trade_date()
         ingestion = await self._repository.latest_ingestion()
+        successful_ingestion = await self._repository.latest_ingestion(successful_only=True)
         expected = expected_latest_trade_date(as_of)
         return DataStatusResponse(
             latest_trade_date=latest,
@@ -145,5 +162,13 @@ class MarketService:
                 rows_received=ingestion.rows_received,
             )
             if ingestion
+            else None,
+            last_successful_ingestion=IngestionStatusResponse(
+                provider=successful_ingestion.provider,
+                status=successful_ingestion.status,
+                finished_at=successful_ingestion.finished_at,
+                rows_received=successful_ingestion.rows_received,
+            )
+            if successful_ingestion
             else None,
         )

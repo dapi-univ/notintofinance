@@ -1,8 +1,15 @@
 from decimal import Decimal
+from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
-from app.providers.zapi import map_zapi_history, map_zapi_summary_row
+from app.providers.zapi import (
+    ZapiProvider,
+    map_zapi_history,
+    map_zapi_summary_row,
+    map_zapi_universe_page,
+)
 
 
 def test_zapi_history_mapping_supports_direct_response_and_preserves_share_units() -> None:
@@ -71,6 +78,11 @@ def test_zapi_history_mapping_rejects_malformed_envelope() -> None:
         map_zapi_history({"data": [], "project": "fixture-project"})
 
 
+def test_zapi_history_mapping_rejects_envelope_without_data() -> None:
+    with pytest.raises(ValueError, match="envelope is missing data"):
+        map_zapi_history({"project": "fixture-project", "timestamp": "now"})
+
+
 def test_zapi_history_mapping_rejects_wrapped_non_share_unit() -> None:
     with pytest.raises(ValueError, match="stock-history unit must be shares"):
         map_zapi_history({"data": {"unit": "lots"}})
@@ -104,3 +116,101 @@ def test_zapi_summary_maps_non_regular_fields() -> None:
     )
     assert result.bars[0].non_regular_volume_shares == 500
     assert result.bars[0].source == "zapi"
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_zapi_securities_normalization(wrapped: bool) -> None:
+    body: dict[str, object] = {
+        "data": [
+            {
+                "Code": "bbri",
+                "Name": "Bank Rakyat Indonesia (Persero) Tbk.",
+                "ListingBoard": "Utama",
+            },
+            {"Code": "TINS", "Name": ""},
+        ],
+        "dataset": "securities",
+        "recordsFiltered": 2,
+    }
+    payload = {"project": "fixture", "data": body, "timestamp": "now"} if wrapped else body
+
+    stocks, total = map_zapi_universe_page(payload)
+
+    assert total == 2
+    assert [stock.ticker for stock in stocks] == ["BBRI", "TINS"]
+    assert stocks[0].company_name == "Bank Rakyat Indonesia (Persero) Tbk."
+    assert stocks[1].company_name == "TINS"
+
+
+def test_zapi_securities_rejects_malformed_envelope() -> None:
+    with pytest.raises(ValueError, match="envelope is missing data"):
+        map_zapi_universe_page({"project": "fixture", "timestamp": "now"})
+
+
+def test_zapi_history_omits_invalid_zero_price_rows_and_reports_them() -> None:
+    payload = {
+        "code": "TINS",
+        "name": "TIMAH Tbk.",
+        "unit": "shares",
+        "items": [
+            {
+                "date": "2026-08-21",
+                "open": 1000,
+                "high": 1050,
+                "low": 990,
+                "close": 1020,
+                "previous": 1000,
+                "volume": 100,
+                "value": 102000,
+                "frequency": 10,
+            },
+            {
+                "date": "2026-08-20",
+                "open": 0,
+                "high": 0,
+                "low": 0,
+                "close": 0,
+                "previous": 0,
+                "volume": 0,
+                "value": 0,
+                "frequency": 0,
+            },
+        ],
+    }
+
+    result = map_zapi_history(payload)
+
+    assert len(result.bars) == 1
+    assert result.rejected_items == 1
+
+
+async def test_zapi_retries_transient_failures_with_bounded_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(503, request=request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"code": "BBCA", "name": "Bank Central Asia Tbk.", "items": []},
+        )
+
+    sleep = AsyncMock()
+    monkeypatch.setattr("app.providers.zapi.asyncio.sleep", sleep)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = ZapiProvider(
+            "fixture-key",
+            "https://provider.invalid",
+            client,
+            max_retries=1,
+        )
+        result = await provider.get_stock_history("BBCA", limit=2)
+
+    assert result.stock.ticker == "BBCA"
+    assert attempts == 2
+    sleep.assert_awaited_once()

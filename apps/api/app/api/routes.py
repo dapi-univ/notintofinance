@@ -26,8 +26,12 @@ async def health() -> dict[str, str]:
 
 
 @router.get("/stocks", response_model=list[StockListItemResponse])
-async def stocks(request: Request) -> list[StockListItemResponse]:
-    return await _service(request).list_stocks()
+async def stocks(
+    request: Request,
+    query: Annotated[str | None, Query(alias="q", max_length=80)] = None,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 1000,
+) -> list[StockListItemResponse]:
+    return (await _service(request).list_stocks(query))[:limit]
 
 
 @router.get("/stocks/{ticker}", response_model=StockDetailResponse)

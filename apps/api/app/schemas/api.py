@@ -8,11 +8,13 @@ class StockListItemResponse(BaseModel):
     ticker: str
     company_name: str
     sector: str | None
+    subsector: str | None
     latest_close: Decimal | None
     change: Decimal | None
     change_percent: Decimal | None
     latest_trade_date: date | None
     sparkline: list[Decimal]
+    has_history: bool
 
 
 class StockDetailResponse(BaseModel):
@@ -35,6 +37,10 @@ class HistoryBarResponse(BaseModel):
     frequency: int
     frequency_analyzer_raw_shares: Decimal | None
     frequency_analyzer_raw_lots: Decimal | None
+    foreign_buy_shares: int | None
+    foreign_sell_shares: int | None
+    foreign_net_shares: int | None
+    cumulative_foreign_net_shares: int | None
 
 
 class HistoryResponse(BaseModel):
@@ -64,3 +70,4 @@ class DataStatusResponse(BaseModel):
     provider: str
     repository: str
     ingestion: IngestionStatusResponse | None
+    last_successful_ingestion: IngestionStatusResponse | None

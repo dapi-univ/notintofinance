@@ -64,3 +64,19 @@ class IngestionRun(Base):
     rows_inserted: Mapped[int] = mapped_column(default=0)
     rows_updated: Mapped[int] = mapped_column(default=0)
     error_message: Mapped[str | None] = mapped_column(Text)
+
+
+class IngestionCheckpoint(Base):
+    __tablename__ = "ingestion_checkpoints"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    provider: Mapped[str] = mapped_column(Text)
+    dataset: Mapped[str] = mapped_column(Text)
+    stock_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("stocks.id", ondelete="CASCADE"), index=True
+    )
+    last_successful_trade_date: Mapped[date | None] = mapped_column(Date)
+    last_successful_fetch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_run_status: Mapped[str] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
