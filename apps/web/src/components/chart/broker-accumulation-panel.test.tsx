@@ -1,8 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BrokerAccumulationResponse } from "@/lib/api/types";
+import { useBrokerAccumulation } from "@/lib/api/queries";
 
 import { BrokerAccumulationPanel } from "./broker-accumulation-panel";
 import { IndicatorMenu } from "./indicator-menu";
@@ -69,7 +71,31 @@ const baseProps = {
   onRetry: vi.fn(),
 };
 
+function BrokerQueryHarness() {
+  const broker = useBrokerAccumulation(
+    "BBCA",
+    "2026-08-20",
+    "2026-08-21",
+    true,
+  );
+  return (
+    <BrokerAccumulationPanel
+      data={broker.data}
+      loading={broker.isLoading}
+      error={broker.isError}
+      range={20}
+      onRange={vi.fn()}
+      onRetry={() => void broker.retry()}
+    />
+  );
+}
+
 describe("Broker Accumulation", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
   it("is default-off and toggleable from the tools menu", async () => {
     const onToggle = vi.fn();
     render(<IndicatorMenu enabled={new Set(["volume"])} onToggle={onToggle} />);
@@ -109,5 +135,56 @@ describe("Broker Accumulation", () => {
     expect(screen.getByText("TOP-10 OBSERVED · NOT FULL MARKET")).toBeInTheDocument();
     expect(screen.getByText("Verified Broker")).toBeInTheDocument();
     expect(screen.getByText(/1 missing/)).toBeInTheDocument();
+  });
+
+  it("gives error precedence so loading and error never render together", () => {
+    render(
+      <BrokerAccumulationPanel
+        {...baseProps}
+        data={undefined}
+        loading
+        error
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Broker history unavailable");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("clears a failed request on Retry, shows pending state, then renders success", async () => {
+    let resolveRetry: ((response: object) => void) | undefined;
+    const retryResponse = new Promise<object>((resolve) => {
+      resolveRetry = resolve;
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        text: async () => JSON.stringify({ detail: "warehouse temporarily unavailable" }),
+      })
+      .mockReturnValueOnce(retryResponse);
+    vi.stubGlobal("fetch", fetchMock);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <BrokerQueryHarness />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Loading broker observations",
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    resolveRetry?.({ ok: true, json: async () => populated });
+    expect(await screen.findByText("Verified Broker")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

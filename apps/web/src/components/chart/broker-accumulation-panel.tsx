@@ -33,6 +33,15 @@ export function BrokerAccumulationPanel({
   onRange,
   onRetry,
 }: Props) {
+  const state = error
+    ? "error"
+    : loading
+      ? "loading"
+      : !data
+        ? "empty"
+        : data.coverage.state === "unavailable"
+          ? "unavailable"
+          : "populated";
   const visible = data?.brokers.slice(0, 6) ?? [];
   const scaleMax = Math.max(
     1,
@@ -63,19 +72,19 @@ export function BrokerAccumulationPanel({
           ))}
         </div>
       </header>
-      {loading ? <div className="broker-panel__state" role="status">Loading broker observations…</div> : null}
-      {error ? (
+      {state === "error" ? (
         <div className="broker-panel__state" role="alert">
           Broker history unavailable. <button type="button" onClick={onRetry}>Retry</button>
         </div>
       ) : null}
-      {!loading && !error && !data ? (
+      {state === "loading" ? <div className="broker-panel__state" role="status">Loading broker observations…</div> : null}
+      {state === "empty" ? (
         <div className="broker-panel__state">No confirmed EOD range is available.</div>
       ) : null}
-      {!loading && !error && data?.coverage.state === "unavailable" ? (
+      {state === "unavailable" ? (
         <div className="broker-panel__state">No observed top-10 broker history is stored for this ticker.</div>
       ) : null}
-      {!loading && !error && data && data.coverage.state !== "unavailable" ? (
+      {state === "populated" && data ? (
         <div className="broker-panel__content">
           <div className="broker-lines" aria-label="Cumulative observed broker net value lines">
             <svg viewBox="0 0 520 108" preserveAspectRatio="none" role="img">
@@ -125,7 +134,7 @@ export function BrokerAccumulationPanel({
           </div>
         </div>
       ) : null}
-      {data ? (
+      {(state === "unavailable" || state === "populated") && data ? (
         <footer className="broker-panel__coverage" data-state={data.coverage.state}>
           {data.coverage.covered_sessions.length}/{data.coverage.expected_sessions.length} sessions covered
           {data.coverage.missing_sessions.length ? ` · ${data.coverage.missing_sessions.length} missing` : ""}

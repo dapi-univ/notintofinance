@@ -101,11 +101,11 @@ export function ChartWorkspace({ ticker, history, loading, fetching, error, onRe
         {brokerEnabled ? (
           <BrokerAccumulationPanel
             data={broker.data?.ticker === ticker ? broker.data : undefined}
-            loading={broker.isLoading || broker.data?.ticker !== ticker}
+            loading={broker.isLoading}
             error={broker.isError}
             range={brokerRange}
             onRange={setBrokerRange}
-            onRetry={() => void broker.refetch()}
+            onRetry={() => void broker.retry()}
           />
         ) : null}
       </div>

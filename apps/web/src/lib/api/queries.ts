@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   fetchBrokerAccumulation,
@@ -38,10 +38,16 @@ export function useBrokerAccumulation(
   dateTo: string | undefined,
   enabled: boolean,
 ) {
-  return useQuery({
-    queryKey: ["broker-accumulation", ticker, dateFrom, dateTo],
+  const queryClient = useQueryClient();
+  const queryKey = ["broker-accumulation", ticker, dateFrom, dateTo] as const;
+  const query = useQuery({
+    queryKey,
     queryFn: ({ signal }) =>
       fetchBrokerAccumulation(ticker, dateFrom ?? "", dateTo ?? "", signal),
     enabled: enabled && Boolean(dateFrom && dateTo),
   });
+  return {
+    ...query,
+    retry: () => queryClient.resetQueries({ queryKey, exact: true }),
+  };
 }
