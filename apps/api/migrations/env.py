@@ -1,19 +1,19 @@
 import asyncio
-import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from app.core.config import Settings
 from app.db.session import normalize_database_url
-from app.models.market import Base
+from app.models import Base
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-database_url = os.getenv("DATABASE_URL")
+database_url = Settings().database_url
 if database_url:
     config.set_main_option("sqlalchemy.url", normalize_database_url(database_url))
 

@@ -1,9 +1,11 @@
 from datetime import date
 
+import httpx
+
 from app.providers.mock import MockMarketDataProvider
 from app.repositories.memory import MemoryMarketRepository
 from app.schemas.domain import ProviderHistory, ProviderUniverse
-from app.services.ingestion import EodBatchIngestionService, IngestionMode
+from app.services.ingestion import EodBatchIngestionService, IngestionMode, _classify_eod_error
 from app.services.market import HistoryTimeframe, MarketService
 
 
@@ -37,6 +39,15 @@ class RecordingProvider:
         self, *, trade_date: date | None = None
     ) -> list[ProviderHistory]:
         return await self._delegate.get_daily_market_summary(trade_date=trade_date)
+
+
+def test_eod_http_429_is_classified_as_retryable() -> None:
+    request = httpx.Request("GET", "https://provider.invalid/stock-history")
+    error = httpx.HTTPStatusError(
+        "rate limited", request=request, response=httpx.Response(429, request=request)
+    )
+
+    assert _classify_eod_error(error) == ("provider_http_429", True, False)
 
 
 async def test_universe_sync_is_idempotent_and_deactivates_missing_stocks() -> None:

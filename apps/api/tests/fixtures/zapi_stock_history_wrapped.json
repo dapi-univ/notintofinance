@@ -1,0 +1,26 @@
+{
+  "project": "sanitized-project",
+  "data": {
+    "code": "BBCA",
+    "name": "Bank Central Asia Tbk.",
+    "dataset": "stock-history",
+    "provider": "idx",
+    "unit": "shares",
+    "items": [
+      {
+        "date": "2026-08-21",
+        "open": 6400,
+        "high": 6475,
+        "low": 6375,
+        "close": 6425,
+        "previous": 6400,
+        "volume": 25000000,
+        "value": 160625000000,
+        "frequency": 10000,
+        "foreignBuyShares": 2000000,
+        "foreignSellShares": 1500000
+      }
+    ]
+  },
+  "timestamp": "2026-08-23T07:00:00Z"
+}

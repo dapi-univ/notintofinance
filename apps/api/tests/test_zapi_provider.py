@@ -201,7 +201,7 @@ async def test_zapi_retries_transient_failures_with_bounded_backoff(
         )
 
     sleep = AsyncMock()
-    monkeypatch.setattr("app.providers.zapi.asyncio.sleep", sleep)
+    monkeypatch.setattr("app.providers.transport.asyncio.sleep", sleep)
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         provider = ZapiProvider(
             "fixture-key",
@@ -214,3 +214,43 @@ async def test_zapi_retries_transient_failures_with_bounded_backoff(
     assert result.stock.ticker == "BBCA"
     assert attempts == 2
     sleep.assert_awaited_once()
+
+
+async def test_zapi_rejected_history_is_sent_to_sanitized_raw_staging() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "code": "LMSH",
+                "unit": "shares",
+                "items": [
+                    {
+                        "date": "2026-08-21",
+                        "open": 0,
+                        "high": 0,
+                        "low": 0,
+                        "close": 0,
+                        "previous": 0,
+                        "volume": 0,
+                        "value": 0,
+                        "frequency": 0,
+                    }
+                ],
+            },
+        )
+
+    sink = AsyncMock()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = ZapiProvider(
+            "fixture-key",
+            "https://provider.invalid",
+            client,
+            raw_payload_sink=sink,
+        )
+        with pytest.raises(ValueError, match="no valid market bars"):
+            await provider.get_stock_history("LMSH", limit=2)
+
+    assert sink.await_args.args[0] == "stock-history"
+    assert sink.await_args.args[1] == "LMSH"
+    assert sink.await_args.args[3] == "rejected"

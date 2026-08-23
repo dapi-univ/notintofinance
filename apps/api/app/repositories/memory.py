@@ -113,7 +113,10 @@ class MemoryMarketRepository:
             if item_provider == provider and item_dataset == dataset and value[0] == status
         )
 
-    async def resumable_tickers(self, *, provider: str, dataset: str) -> list[str]:
+    async def resumable_tickers(
+        self, *, provider: str, dataset: str, include_terminal: bool = False
+    ) -> list[str]:
+        del include_terminal
         output: list[str] = []
         for ticker in self._active:
             checkpoint = self._checkpoints.get((provider, dataset, ticker))

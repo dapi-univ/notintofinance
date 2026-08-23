@@ -1,10 +1,11 @@
 from datetime import UTC, date, datetime
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import Database
 from app.models.market import DailyMarketData, IngestionCheckpoint, IngestionRun, Stock
+from app.models.warehouse import DataQualityEvent
 from app.repositories.base import HistoryState, IngestionStatus, StockSnapshot
 from app.schemas.domain import MarketBar, StockIdentity
 
@@ -270,28 +271,46 @@ class PostgresMarketRepository:
                 ).all()
             )
 
-    async def resumable_tickers(self, *, provider: str, dataset: str) -> list[str]:
+    async def resumable_tickers(
+        self, *, provider: str, dataset: str, include_terminal: bool = False
+    ) -> list[str]:
         async with self._database.session() as session:
+            statement = (
+                select(Stock.ticker)
+                .outerjoin(
+                    IngestionCheckpoint,
+                    and_(
+                        IngestionCheckpoint.stock_id == Stock.id,
+                        IngestionCheckpoint.provider == provider,
+                        IngestionCheckpoint.dataset == dataset,
+                    ),
+                )
+                .where(
+                    Stock.is_active,
+                    or_(
+                        IngestionCheckpoint.id.is_(None),
+                        IngestionCheckpoint.last_run_status.in_(["failed", "running"]),
+                    ),
+                )
+            )
+            if not include_terminal:
+                terminal_event = exists(
+                    select(DataQualityEvent.id).where(
+                        DataQualityEvent.stock_id == Stock.id,
+                        DataQualityEvent.provider == provider,
+                        DataQualityEvent.dataset == dataset,
+                        DataQualityEvent.is_terminal,
+                        DataQualityEvent.resolved_at.is_(None),
+                    )
+                )
+                statement = statement.where(~terminal_event)
             return list(
                 (
                     await session.scalars(
-                        select(Stock.ticker)
-                        .outerjoin(
-                            IngestionCheckpoint,
-                            and_(
-                                IngestionCheckpoint.stock_id == Stock.id,
-                                IngestionCheckpoint.provider == provider,
-                                IngestionCheckpoint.dataset == dataset,
-                            ),
+                        statement.order_by(
+                            case((IngestionCheckpoint.id.is_(None), 0), else_=1),
+                            Stock.ticker,
                         )
-                        .where(
-                            Stock.is_active,
-                            or_(
-                                IngestionCheckpoint.id.is_(None),
-                                IngestionCheckpoint.last_run_status.in_(["failed", "running"]),
-                            ),
-                        )
-                        .order_by(Stock.ticker)
                     )
                 ).all()
             )

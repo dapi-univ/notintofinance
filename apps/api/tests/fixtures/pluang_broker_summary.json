@@ -1,0 +1,21 @@
+{
+  "data": {
+    "brokerSummary": [
+      {
+        "buyAverage": 6439,
+        "buyLot": 150759,
+        "buyValue": 97081440000,
+        "buyerCode": {"value": "AK"},
+        "sellAverage": 6443,
+        "sellLot": 182436,
+        "sellValue": 117543737500,
+        "sellerCode": {"value": "RX"}
+      }
+    ],
+    "endDate": "2026-08-21",
+    "net": true,
+    "startDate": "2026-08-21"
+  },
+  "statusCode": 200,
+  "timestamp": "2026-08-23T07:01:33Z"
+}

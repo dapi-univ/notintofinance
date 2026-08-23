@@ -12,8 +12,10 @@ Verified against the public Zapi scraper catalog and authenticated live response
 - Request timeout: 30 seconds.
 - Retryable failures: network errors, HTTP 429, and HTTP 5xx responses. The client uses
   bounded exponential backoff with jitter and honors `Retry-After` when supplied.
-- Observed account headers advertised limits of 100 requests per minute and 600 requests
-  per month. Quotas are plan-specific and must be re-checked before a large backfill.
+- Live headers on 2026-08-23 reported 2,000 requests remaining per minute and 24,452
+  remaining for the month before Phase 1 ingestion. `X-RateLimit-Limit` and
+  `X-Plan-Expired` were absent. Missing headers are persisted as warnings and never treated
+  as unlimited quota. Quotas are plan-specific and are re-checked before a large backfill.
 
 ## IDX securities universe
 
@@ -92,6 +94,6 @@ Verified against the public Zapi scraper catalog and authenticated live response
 - Normal application reads are PostgreSQL-only. Zapi is invoked only by the ingestion CLI.
 - `daily_market_data` is upserted on `(stock_id, trade_date)` and never replaced wholesale.
 - Provider failure leaves previously stored history readable.
-- The observed monthly quota is lower than the current universe size, so a complete
-  one-request-per-ticker backfill cannot finish within one fresh monthly allowance. Staged
-  ingestion and checkpoint-based resume are required unless the account quota changes.
+- Phase 1 enforces a 2,500-request monthly reserve, an 800-request default daily soft budget,
+  and explicit run caps. Checkpoint-based resume remains mandatory even when the observed
+  allowance can cover the current universe.

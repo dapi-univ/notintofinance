@@ -1,8 +1,11 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import StrEnum
+
+import httpx
 
 from app.providers.base import MarketDataProvider
 from app.repositories.base import MarketRepository
@@ -89,9 +92,16 @@ class BatchIngestionResult:
 class EodBatchIngestionService:
     dataset = "stock-history"
 
-    def __init__(self, provider: MarketDataProvider, repository: MarketRepository):
+    def __init__(
+        self,
+        provider: MarketDataProvider,
+        repository: MarketRepository,
+        *,
+        failure_recorder: Callable[[str, str, bool, bool], Awaitable[None]] | None = None,
+    ):
         self._provider = provider
         self._repository = repository
+        self._failure_recorder = failure_recorder
 
     async def synchronize_universe(self) -> UniverseSyncResult:
         universe = await self._provider.get_stock_universe()
@@ -109,10 +119,11 @@ class EodBatchIngestionService:
             status="failed",
         )
 
-    async def resumable_tickers(self) -> list[str]:
+    async def resumable_tickers(self, *, include_terminal: bool = False) -> list[str]:
         return await self._repository.resumable_tickers(
             provider=self._provider.name,
             dataset=self.dataset,
+            include_terminal=include_terminal,
         )
 
     async def ingest(
@@ -199,6 +210,8 @@ class EodBatchIngestionService:
                 date_from=date_from,
                 limit=target_sessions,
             )
+            if not history.bars:
+                raise ValueError("empty_history: provider returned no valid market bars")
             inserted, updated = await self._repository.upsert_history(history.stock, history.bars)
             latest = max(
                 (bar.trade_date for bar in history.bars),
@@ -227,6 +240,10 @@ class EodBatchIngestionService:
             )
         except Exception as error:
             message = str(error)[:1000]
+            reason, retryable, terminal = _classify_eod_error(error)
+            if self._failure_recorder:
+                with suppress(LookupError, RuntimeError):
+                    await self._failure_recorder(ticker, reason, retryable, terminal)
             with suppress(LookupError, RuntimeError):
                 await self._repository.update_checkpoint(
                     ticker,
@@ -236,6 +253,22 @@ class EodBatchIngestionService:
                     error_message=message,
                 )
             return TickerIngestionResult(ticker, "failed", effective_mode, 0, 0, 0, 0, message)
+
+
+def _classify_eod_error(error: Exception) -> tuple[str, bool, bool]:
+    message = str(error).lower()
+    if isinstance(error, httpx.HTTPStatusError):
+        retryable = error.response.status_code == 429 or error.response.status_code >= 500
+        return f"provider_http_{error.response.status_code}", retryable, not retryable
+    if isinstance(error, httpx.RequestError):
+        return "provider_transient", True, False
+    if "empty_history" in message or "no valid market bars" in message:
+        return "empty_history", False, True
+    if "unit must be shares" in message:
+        return "malformed_unit", False, True
+    if "stock-history" in message or isinstance(error, ValueError):
+        return "validation_failure", False, True
+    return "provider_failure", True, False
 
 
 async def seed_mock_repository(provider: MarketDataProvider, repository: MarketRepository) -> None:

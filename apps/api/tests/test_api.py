@@ -4,6 +4,49 @@ from app.core.config import Settings
 from app.main import create_app
 
 
+class FakeWarehouseService:
+    async def broker_flow(
+        self, ticker: str, date_from: object, date_to: object
+    ) -> dict[str, object]:
+        return {"ticker": ticker, "source_scope": "top_n", "source_top_n": 10, "rows": []}
+
+    async def trades(
+        self,
+        ticker: str,
+        date_from: object,
+        date_to: object,
+        *,
+        limit: int,
+        cursor: int | None,
+    ) -> dict[str, object]:
+        return {"ticker": ticker, "rows": [], "next_cursor": None}
+
+    async def latest_orderbook(self, ticker: str) -> dict[str, object]:
+        return {
+            "ticker": ticker,
+            "kind": "resting_liquidity_snapshot",
+            "provider": "pluang",
+            "observed_at": "2026-08-23T07:01:33Z",
+            "best_bid": 6425,
+            "best_ask": 6450,
+            "spread": 25,
+            "levels": [],
+        }
+
+    async def coverage(self) -> dict[str, int]:
+        return {
+            "active_stocks": 962,
+            "stocks_with_eod_history": 439,
+            "pluang_mapped_stocks": 3,
+            "broker_flow_rows": 60,
+            "trade_print_rows": 100,
+            "orderbook_snapshots": 3,
+        }
+
+    async def quota_status(self) -> dict[str, object]:
+        return {"providers": []}
+
+
 def test_dashboard_api_data_flow() -> None:
     app = create_app(
         Settings(
@@ -82,3 +125,32 @@ def test_foreign_net_and_cumulative_values_are_derived_from_stored_shares() -> N
         running += expected_net
         assert bar["foreign_net_shares"] == expected_net
         assert bar["cumulative_foreign_net_shares"] == running
+
+
+def test_database_only_warehouse_read_routes_and_coverage_contracts() -> None:
+    app = create_app(Settings(app_env="test", market_data_provider="mock", database_url=None))
+    with TestClient(app) as client:
+        app.state.warehouse_service = FakeWarehouseService()
+        broker = client.get("/stocks/BBCA/broker-flow?from=2026-08-21&to=2026-08-21")
+        trades = client.get("/stocks/BBCA/trades?from=2026-08-21&to=2026-08-21&limit=100")
+        orderbook = client.get("/stocks/BBCA/orderbook/latest")
+        coverage = client.get("/data/coverage")
+        quota = client.get("/data/quota-status")
+
+    assert broker.status_code == 200
+    assert broker.json()["source_top_n"] == 10
+    assert trades.status_code == 200
+    assert orderbook.json()["kind"] == "resting_liquidity_snapshot"
+    assert coverage.json()["active_stocks"] == 962
+    assert quota.json() == {"providers": []}
+
+
+def test_warehouse_routes_enforce_bounded_ranges() -> None:
+    app = create_app(Settings(app_env="test", market_data_provider="mock", database_url=None))
+    with TestClient(app) as client:
+        app.state.warehouse_service = FakeWarehouseService()
+        broker = client.get("/stocks/BBCA/broker-flow?from=2026-01-01&to=2026-08-21")
+        trades = client.get("/stocks/BBCA/trades?from=2026-08-01&to=2026-08-21")
+
+    assert broker.status_code == 422
+    assert trades.status_code == 422

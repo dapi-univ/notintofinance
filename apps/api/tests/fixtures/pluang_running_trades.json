@@ -1,0 +1,11 @@
+{
+  "data": {
+    "next": "MjI2OTQ=",
+    "rt": [
+      {"action": "SELL", "lot": 29, "price": 6425, "seq": 23034, "time": "15:49:58"},
+      {"action": "BUY", "lot": 1, "price": 6450, "seq": 23033, "time": "15:49:58"}
+    ]
+  },
+  "statusCode": 200,
+  "timestamp": "2026-08-23T07:01:33Z"
+}

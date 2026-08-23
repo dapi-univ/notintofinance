@@ -11,8 +11,10 @@ from app.providers.factory import create_provider
 from app.repositories.base import MarketRepository
 from app.repositories.memory import MemoryMarketRepository
 from app.repositories.postgres import PostgresMarketRepository
+from app.repositories.warehouse import PostgresWarehouseRepository
 from app.services.ingestion import seed_mock_repository
 from app.services.market import MarketService
+from app.services.warehouse_read import WarehouseReadService
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -25,8 +27,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if resolved.database_url:
             database = Database(resolved.database_url)
             repository = PostgresMarketRepository(database)
+            app.state.warehouse_service = WarehouseReadService(
+                PostgresWarehouseRepository(
+                    database, raw_retention_days=resolved.raw_payload_retention_days
+                )
+            )
         else:
             repository = MemoryMarketRepository()
+            app.state.warehouse_service = None
 
         provider = create_provider(resolved)
         if repository.kind == "memory":

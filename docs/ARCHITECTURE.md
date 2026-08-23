@@ -10,6 +10,15 @@ The production data path is:
 
 `Zapi -> MarketDataProvider -> Pydantic validation -> repository upsert -> Supabase PostgreSQL -> FastAPI -> TanStack Query -> Lightweight Charts`
 
+Phase 1 adds a provider-neutral operational path alongside the stable dashboard path:
+
+`Zapi / Pluang -> quota-aware transport -> sanitized raw staging -> typed normalization -> warehouse repositories -> Supabase PostgreSQL -> FastAPI`
+
+Provider instrument identifiers are mappings only; `stocks.id` remains canonical. Pluang is
+used for instrument resolution and bounded broker-flow, running-trade, and orderbook
+collection. Orderbook rows are resting-liquidity snapshots, running trades are executed
+prints without broker identity, and broker summaries explicitly retain their top-10 scope.
+
 When `DATABASE_URL` or `ZAPI_API_KEY` is unavailable, development starts with the explicit `mock` provider and an in-memory repository. Mock responses include `is_mock: true`, and the web workspace shows a persistent `MOCK DATA` badge. Mock mode is never presented as live market data.
 
 ## State boundaries
@@ -25,6 +34,12 @@ bounded worker pool, recent-window refreshes, idempotent database upserts, and p
 checkpoints. One ticker failure is recorded without rolling back other completed symbols.
 Normal API reads do not instantiate or call the provider.
 
+Every provider attempt is fingerprinted without credentials and recorded with latency,
+status, attempt number, row count, cache status, and available quota headers. Zapi ingestion
+stops non-critical work at the configured daily soft budget or 2,500-request monthly reserve.
+Canaries have a separate hard request cap. Advisory locks prevent concurrent ingestion of
+the same dataset session.
+
 ## Analytics
 
 Raw values are calculated in the API as `volume / frequency^3`. Share and lot research series are returned separately. The frontend registry applies an explicitly named `log10(raw shares)` visualization transform without overwriting either raw series.
@@ -39,3 +54,6 @@ FastAPI uses a pooled server-side PostgreSQL connection. The browser never recei
 credentials. Public-schema tables, including `alembic_version`, have RLS enabled and browser
 roles have no grants; the application does not use Supabase Auth, Storage, Realtime, or Edge
 Functions.
+
+Raw provider payloads are sanitized, backend-only, hash-deduplicated, and assigned a bounded
+expiry. They are never returned from API routes.

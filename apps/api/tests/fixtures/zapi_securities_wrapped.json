@@ -1,0 +1,16 @@
+{
+  "project": "sanitized-project",
+  "data": {
+    "data": [
+      {"Code": "BBCA", "Name": "Bank Central Asia Tbk.", "ListingBoard": "Utama"},
+      {"Code": "TLKM", "Name": "Telkom Indonesia (Persero) Tbk.", "ListingBoard": "Utama"}
+    ],
+    "dataset": "securities",
+    "provider": "idx",
+    "start": 0,
+    "length": 2,
+    "recordsTotal": 2,
+    "recordsFiltered": 2
+  },
+  "timestamp": "2026-08-23T07:00:00Z"
+}

@@ -71,3 +71,86 @@ class DataStatusResponse(BaseModel):
     repository: str
     ingestion: IngestionStatusResponse | None
     last_successful_ingestion: IngestionStatusResponse | None
+
+
+class BrokerFlowItemResponse(BaseModel):
+    trade_date_from: date
+    trade_date_to: date
+    broker_code: str
+    broker_name: str | None
+    side: str
+    rank: int
+    lots: int
+    shares: int
+    value_idr: Decimal
+    average_price: Decimal
+    provider: str
+    source_scope: str
+    source_top_n: int | None
+
+
+class BrokerFlowResponse(BaseModel):
+    ticker: str
+    source_scope: str
+    source_top_n: int | None
+    rows: list[BrokerFlowItemResponse]
+
+
+class TradePrintResponse(BaseModel):
+    id: int
+    provider_sequence: str
+    trade_date: date
+    executed_at: datetime
+    price: Decimal
+    lots: int
+    shares: int
+    aggressor_action: str | None
+    provider: str
+
+
+class TradesResponse(BaseModel):
+    ticker: str
+    rows: list[TradePrintResponse]
+    next_cursor: int | None
+
+
+class OrderbookLevelResponse(BaseModel):
+    side: str
+    level_rank: int
+    price: Decimal
+    lots: int
+
+
+class OrderbookSnapshotResponse(BaseModel):
+    ticker: str
+    kind: str = "resting_liquidity_snapshot"
+    provider: str
+    observed_at: datetime
+    best_bid: Decimal | None
+    best_ask: Decimal | None
+    spread: Decimal | None
+    levels: list[OrderbookLevelResponse]
+
+
+class CoverageResponse(BaseModel):
+    active_stocks: int
+    stocks_with_eod_history: int
+    pluang_mapped_stocks: int
+    broker_flow_rows: int
+    trade_print_rows: int
+    orderbook_snapshots: int
+
+
+class ProviderQuotaResponse(BaseModel):
+    provider: str
+    observed_at: datetime | None
+    requests_today: int
+    limit: int | None
+    remaining_minute: int | None
+    remaining_month: int | None
+    plan_expired: bool | None
+    warning: str | None
+
+
+class QuotaStatusResponse(BaseModel):
+    providers: list[ProviderQuotaResponse]

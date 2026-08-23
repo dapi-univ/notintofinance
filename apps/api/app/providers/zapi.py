@@ -1,14 +1,17 @@
-import asyncio
-import random
 import re
+from collections.abc import Awaitable, Callable
 from datetime import date
 from decimal import Decimal
 
 import httpx
 
+from app.providers.transport import QuotaAwareTransport
 from app.schemas.domain import MarketBar, ProviderHistory, ProviderUniverse, StockIdentity
 
 TICKER_PATTERN = re.compile(r"^[A-Z0-9]{1,12}$")
+RawPayloadSink = Callable[
+    [str, str | None, dict[str, object], str, str | None], Awaitable[None]
+]
 
 
 class ZapiProvider:
@@ -23,41 +26,27 @@ class ZapiProvider:
         client: httpx.AsyncClient | None = None,
         *,
         max_retries: int = 2,
+        transport: QuotaAwareTransport | None = None,
+        raw_payload_sink: RawPayloadSink | None = None,
     ):
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
-        self._client = client
-        self._max_retries = max_retries
+        self._transport = transport or QuotaAwareTransport(
+            provider=self.name,
+            client=client,
+            max_retries=max_retries,
+            expect_quota_headers=True,
+        )
+        self._raw_payload_sink = raw_payload_sink
 
     async def _get(self, endpoint: str, params: dict[str, str | int]) -> dict[str, object]:
-        owns_client = self._client is None
-        client = self._client or httpx.AsyncClient(timeout=30)
-        try:
-            for attempt in range(self._max_retries + 1):
-                try:
-                    response = await client.get(
-                        f"{self._base_url}/{endpoint}",
-                        params=params,
-                        headers={"x-api-key": self._api_key},
-                    )
-                    if (
-                        response.status_code == 429 or response.status_code >= 500
-                    ) and attempt < self._max_retries:
-                        await asyncio.sleep(_retry_delay(response, attempt))
-                        continue
-                    response.raise_for_status()
-                    payload = response.json()
-                    if not isinstance(payload, dict):
-                        raise ValueError("Zapi returned a non-object response")
-                    return payload
-                except httpx.RequestError:
-                    if attempt >= self._max_retries:
-                        raise
-                    await asyncio.sleep(_backoff_delay(attempt))
-            raise RuntimeError("Zapi request retry loop exhausted")
-        finally:
-            if owns_client:
-                await client.aclose()
+        return await self._transport.get_json(
+            dataset=endpoint,
+            endpoint_name=endpoint,
+            url=f"{self._base_url}/{endpoint}",
+            params=params,
+            headers={"x-api-key": self._api_key},
+        )
 
     async def get_stock_history(
         self,
@@ -75,7 +64,16 @@ class ZapiProvider:
             params["from"] = date_from.isoformat()
         if date_to:
             params["to"] = date_to.isoformat()
-        return map_zapi_history(await self._get("stock-history", params))
+        payload = await self._get("stock-history", params)
+        try:
+            history = map_zapi_history(payload)
+        except ValueError as error:
+            await self._stage_payload(
+                "stock-history", code, payload, "rejected", str(error)
+            )
+            raise
+        await self._stage_payload("stock-history", code, payload, "normalized", None)
+        return history
 
     async def get_daily_market_summary(
         self, *, trade_date: date | None = None
@@ -84,8 +82,16 @@ class ZapiProvider:
         if trade_date:
             params["date"] = trade_date.isoformat()
         payload = await self._get("stock-summary", params)
-        rows = _unwrap_rows(payload, dataset="stock-summary")
-        return [map_zapi_summary_row(row) for row in rows if isinstance(row, dict)]
+        try:
+            rows = _unwrap_rows(payload, dataset="stock-summary")
+            result = [map_zapi_summary_row(row) for row in rows if isinstance(row, dict)]
+        except ValueError as error:
+            await self._stage_payload(
+                "stock-summary", None, payload, "rejected", str(error)
+            )
+            raise
+        await self._stage_payload("stock-summary", None, payload, "normalized", None)
+        return result
 
     async def get_stock_universe(self) -> ProviderUniverse:
         page_size = 1000
@@ -94,7 +100,14 @@ class ZapiProvider:
         expected_total: int | None = None
         while expected_total is None or start < expected_total:
             payload = await self._get("securities", {"start": start, "length": page_size})
-            page, total = map_zapi_universe_page(payload)
+            try:
+                page, total = map_zapi_universe_page(payload)
+            except ValueError as error:
+                await self._stage_payload(
+                    "securities", None, payload, "rejected", str(error)
+                )
+                raise
+            await self._stage_payload("securities", None, payload, "normalized", None)
             expected_total = total
             for stock in page:
                 stocks[stock.ticker] = stock
@@ -107,6 +120,17 @@ class ZapiProvider:
                 f"expected {expected_total}, got {len(stocks)}"
             )
         return ProviderUniverse(stocks=list(stocks.values()), total=expected_total)
+
+    async def _stage_payload(
+        self,
+        dataset: str,
+        instrument_key: str | None,
+        payload: dict[str, object],
+        status: str,
+        error: str | None,
+    ) -> None:
+        if self._raw_payload_sink:
+            await self._raw_payload_sink(dataset, instrument_key, payload, status, error)
 
 
 def _decimal(value: object) -> Decimal:
@@ -213,20 +237,6 @@ def _unwrap_rows(payload: dict[str, object], *, dataset: str) -> list[object]:
     if not isinstance(rows, list):
         raise ValueError(f"Zapi {dataset} data must be a list")
     return rows
-
-
-def _backoff_delay(attempt: int) -> float:
-    return 0.2 * (2**attempt) + random.uniform(0, 0.1)
-
-
-def _retry_delay(response: httpx.Response, attempt: int) -> float:
-    retry_after = response.headers.get("retry-after")
-    if retry_after:
-        try:
-            return max(float(retry_after), 0)
-        except ValueError:
-            pass
-    return _backoff_delay(attempt)
 
 
 def map_zapi_summary_row(item: dict[str, object]) -> ProviderHistory:

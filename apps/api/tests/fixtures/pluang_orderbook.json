@@ -1,0 +1,11 @@
+{
+  "data": {
+    "askPercent": 87,
+    "asks": [{"l": 75223, "p": 6450}],
+    "bidPercent": 13,
+    "bids": [{"l": 10955, "p": 6425}],
+    "subscription": "sanitized-subscription"
+  },
+  "statusCode": 200,
+  "timestamp": "2026-08-23T07:01:33Z"
+}
