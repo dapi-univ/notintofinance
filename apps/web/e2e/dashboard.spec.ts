@@ -30,6 +30,9 @@ test("critical Dashboard V0 workspace flow", async ({ page }) => {
   await page.getByText("Indicators", { exact: true }).click();
   await page.getByLabel("Frequency Analyzer").check();
   await expect(page.getByTestId("frequency-analyzer-pane")).toBeVisible();
+
+  await page.getByLabel("Foreign Analysis").check();
+  await expect(page.getByTestId("foreign-analysis-pane")).toBeVisible();
   await page.getByLabel("Frequency Analyzer").uncheck();
   await expect(page.getByTestId("frequency-analyzer-pane")).toBeHidden();
   await page.getByLabel("Frequency Analyzer").check();
@@ -65,6 +68,14 @@ test("critical Dashboard V0 workspace flow", async ({ page }) => {
 
   await page.reload();
   await expect(page.getByTestId("active-ticker")).toHaveText("ANTM");
+  await expect(page.getByTestId("market-chart")).toBeVisible();
+});
+
+test("ticker search selects another database-backed symbol", async ({ page }) => {
+  await page.goto("/app");
+  await page.getByPlaceholder("Search ticker or company").fill("BMRI");
+  await page.locator('[data-ticker="BMRI"]').click();
+  await expect(page.getByTestId("active-ticker")).toHaveText("BMRI");
   await expect(page.getByTestId("market-chart")).toBeVisible();
 });
 

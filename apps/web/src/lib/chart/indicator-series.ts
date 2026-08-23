@@ -1,8 +1,13 @@
 import type { HistoryBar } from "@/lib/api/types";
-import type { IndicatorDefinition, IndicatorId, IndicatorRenderTheme } from "@/lib/indicators/registry";
+import type {
+  IndicatorDefinition,
+  IndicatorId,
+  IndicatorRenderTheme,
+  IndicatorSeriesDefinition,
+} from "@/lib/indicators/registry";
 
 export type IndicatorSeries = {
-  setData: (data: ReturnType<IndicatorDefinition["transform"]>) => void;
+  setData: (data: ReturnType<IndicatorSeriesDefinition["transform"]>) => void;
 };
 
 type SyncIndicatorSeriesOptions<TSeries extends IndicatorSeries> = {
@@ -10,8 +15,11 @@ type SyncIndicatorSeriesOptions<TSeries extends IndicatorSeries> = {
   definitions: IndicatorDefinition[];
   enabled: ReadonlySet<IndicatorId>;
   theme: IndicatorRenderTheme;
-  seriesById: Map<IndicatorId, TSeries>;
-  createSeries: (definition: IndicatorDefinition) => TSeries;
+  seriesById: Map<IndicatorId, Map<string, TSeries>>;
+  createSeries: (
+    definition: IndicatorDefinition,
+    seriesDefinition: IndicatorSeriesDefinition,
+  ) => TSeries;
   removeSeries: (series: TSeries) => void;
 };
 
@@ -24,20 +32,36 @@ export function syncIndicatorSeries<TSeries extends IndicatorSeries>({
   createSeries,
   removeSeries,
 }: SyncIndicatorSeriesOptions<TSeries>): void {
-  for (const [id, series] of seriesById) {
+  for (const [id, group] of seriesById) {
     if (!enabled.has(id)) {
-      removeSeries(series);
+      group.forEach((series) => removeSeries(series));
       seriesById.delete(id);
     }
   }
 
   for (const definition of definitions) {
     if (!enabled.has(definition.id)) continue;
-    let series = seriesById.get(definition.id);
-    if (!series) {
-      series = createSeries(definition);
-      seriesById.set(definition.id, series);
+    let group = seriesById.get(definition.id);
+    if (!group) {
+      group = new Map<string, TSeries>();
+      seriesById.set(definition.id, group);
     }
-    series.setData(definition.transform(bars, theme));
+    const expected = new Set(
+      definition.rendering.series.map((seriesDefinition) => seriesDefinition.id),
+    );
+    for (const [seriesId, series] of group) {
+      if (!expected.has(seriesId)) {
+        removeSeries(series);
+        group.delete(seriesId);
+      }
+    }
+    for (const seriesDefinition of definition.rendering.series) {
+      let series = group.get(seriesDefinition.id);
+      if (!series) {
+        series = createSeries(definition, seriesDefinition);
+        group.set(seriesDefinition.id, series);
+      }
+      series.setData(seriesDefinition.transform(bars, theme));
+    }
   }
 }

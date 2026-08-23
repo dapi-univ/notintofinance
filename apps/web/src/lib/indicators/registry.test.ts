@@ -3,10 +3,11 @@ import { describe, expect, it } from "vitest";
 import { indicatorDefinitions, indicatorRegistry } from "./registry";
 
 describe("indicator registry", () => {
-  it("is the single source of truth for V0 panes", () => {
+  it("is the single source of truth for operational EOD panes", () => {
     expect(indicatorDefinitions.map((item) => item.id)).toEqual([
       "volume",
       "frequency-analyzer",
+      "foreign-analysis",
     ]);
     expect(indicatorRegistry.volume.defaultVisible).toBe(true);
     expect(indicatorRegistry.volume.category).toBe("market-data");
@@ -15,9 +16,15 @@ describe("indicator registry", () => {
       "log10(raw shares)",
     );
     expect(indicatorRegistry["frequency-analyzer"].rendering).toMatchObject({
-      seriesType: "histogram",
-      paneIndex: 2,
       testId: "frequency-analyzer-pane",
     });
+    expect(
+      indicatorRegistry["frequency-analyzer"].rendering.series[0].seriesType,
+    ).toBe("histogram");
+    expect(
+      indicatorRegistry["foreign-analysis"].rendering.series.map(
+        (series) => series.id,
+      ),
+    ).toEqual(["buy", "sell", "net", "cumulative"]);
   });
 });

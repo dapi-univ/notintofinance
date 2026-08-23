@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import type { HistoryBar } from "@/lib/api/types";
 
-import { filterBarsByTimeframe, toCandles, toFrequencyAnalyzer, toLine } from "./adapter";
+import {
+  filterBarsByTimeframe,
+  toCandles,
+  toCumulativeForeignNet,
+  toForeignNet,
+  toFrequencyAnalyzer,
+  toLine,
+} from "./adapter";
 
 const bar = (date: string, raw: number | null = 0.001): HistoryBar => ({
   date,
@@ -17,6 +24,10 @@ const bar = (date: string, raw: number | null = 0.001): HistoryBar => ({
   frequency: 10,
   frequency_analyzer_raw_shares: raw,
   frequency_analyzer_raw_lots: raw === null ? null : raw / 100,
+  foreign_buy_shares: 600,
+  foreign_sell_shares: 400,
+  foreign_net_shares: 200,
+  cumulative_foreign_net_shares: 200,
 });
 
 describe("chart adapter", () => {
@@ -41,5 +52,15 @@ describe("chart adapter", () => {
 
   it("omits null raw values from the visual transform", () => {
     expect(toFrequencyAnalyzer([bar("2026-08-21", null)])).toEqual([]);
+  });
+
+  it("renders daily and cumulative foreign share flows", () => {
+    const bars = [bar("2026-08-21")];
+    expect(toForeignNet(bars, { up: "green", down: "red" })).toEqual([
+      { time: "2026-08-21", value: 200, color: "green" },
+    ]);
+    expect(toCumulativeForeignNet(bars)).toEqual([
+      { time: "2026-08-21", value: 200 },
+    ]);
   });
 });

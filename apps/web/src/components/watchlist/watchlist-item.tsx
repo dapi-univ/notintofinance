@@ -14,19 +14,22 @@ type Props = {
 
 export function WatchlistItem({ stock, selected, onSelect, onPrefetch }: Props) {
   const direction = marketDirection(stock.change);
+  const available = stock.has_history;
   return (
     <button
       type="button"
       className={`watchlist-item ${selected ? "watchlist-item--selected" : ""}`}
       onClick={() => onSelect(stock.ticker)}
-      onMouseEnter={() => onPrefetch(stock.ticker)}
-      onFocus={() => onPrefetch(stock.ticker)}
+      onMouseEnter={() => available && onPrefetch(stock.ticker)}
+      onFocus={() => available && onPrefetch(stock.ticker)}
       aria-pressed={selected}
+      disabled={!available}
+      title={available ? stock.company_name : "History ingestion pending"}
       data-ticker={stock.ticker}
     >
       <span className="watchlist-item__identity">
         <strong>{stock.ticker}</strong>
-        <span title={stock.company_name}>{stock.company_name}</span>
+        <span>{stock.company_name}</span>
       </span>
       <MiniSparkline values={stock.sparkline} direction={direction} />
       <span className="watchlist-item__quote">

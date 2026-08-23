@@ -233,6 +233,8 @@ button:active:not(:disabled) { transform: scale(0.97); }
   cursor: pointer;
 }
 .watchlist-item:hover { background: var(--bg-interactive); }
+.watchlist-item:disabled { cursor: not-allowed; opacity: 0.5; }
+.watchlist-item:disabled:hover { background: transparent; }
 .watchlist-item--selected {
   background: var(--bg-elevated);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025), 0 4px 14px rgba(0, 0, 0, 0.18);
@@ -433,6 +435,7 @@ button:active:not(:disabled) { transform: scale(0.97); }
   letter-spacing: 0.055em;
 }
 .pane-label--frequency { color: var(--accent); }
+.pane-label--foreign { color: var(--text-secondary); }
 .chart-refresh { position: absolute; top: 10px; right: 84px; z-index: 6; display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: var(--radius-control); background: rgba(31, 31, 31, 0.94); color: var(--text-secondary); box-shadow: var(--shadow-surface), inset 0 0 0 1px var(--border-muted); font-size: 10px; }
 .chart-refresh svg { animation: spin 1s linear infinite; }
 .workspace-footer { min-width: 0; gap: 20px; justify-content: flex-start; overflow: hidden; border-top: 0; background: var(--bg-surface); white-space: nowrap; }

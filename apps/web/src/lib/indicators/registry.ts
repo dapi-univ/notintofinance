@@ -1,14 +1,40 @@
-import type { HistogramSeriesPartialOptions } from "lightweight-charts";
+import type {
+  HistogramSeriesPartialOptions,
+  LineSeriesPartialOptions,
+} from "lightweight-charts";
 
 import type { HistoryBar, Numberish } from "@/lib/api/types";
-import { toFrequencyAnalyzer, toVolume } from "@/lib/chart/adapter";
+import {
+  toCumulativeForeignNet,
+  toForeignBuy,
+  toForeignNet,
+  toForeignSell,
+  toFrequencyAnalyzer,
+  toVolume,
+} from "@/lib/chart/adapter";
 import { formatCompact, toNumber } from "@/lib/format/market";
 
-export type IndicatorId = "volume" | "frequency-analyzer";
+export type IndicatorId =
+  | "volume"
+  | "frequency-analyzer"
+  | "foreign-analysis";
 export type IndicatorCategory = "market-data" | "analytics";
 export type IndicatorRenderTheme = {
   volumeUp: string;
   volumeDown: string;
+};
+export type IndicatorSeriesType = "histogram" | "line";
+export type IndicatorPoint = { time: string; value: number; color?: string };
+
+export type IndicatorSeriesDefinition = {
+  id: string;
+  seriesType: IndicatorSeriesType;
+  transform: (
+    bars: HistoryBar[],
+    theme: IndicatorRenderTheme,
+  ) => IndicatorPoint[];
+  options: HistogramSeriesPartialOptions | LineSeriesPartialOptions;
+  colorToken?: "--accent" | "--indicator-fa" | "--market-up" | "--market-down";
 };
 
 export type IndicatorDefinition = {
@@ -19,20 +45,22 @@ export type IndicatorDefinition = {
   defaultVisible: boolean;
   requires: Array<keyof HistoryBar>;
   normalization: string | null;
-  transform: (bars: HistoryBar[], theme: IndicatorRenderTheme) => Array<{ time: string; value: number; color?: string }>;
   valueFormatter: (value: Numberish | null) => string;
   rendering: {
-    seriesType: "histogram";
-    paneIndex: number;
     paneLabel: string;
     paneLabelClassName: string;
     testId: string;
-    options: HistogramSeriesPartialOptions;
-    colorToken?: "--accent" | "--indicator-fa";
+    series: IndicatorSeriesDefinition[];
   };
 };
 
-export const indicatorGroups: Array<{ id: IndicatorCategory; label: string }> = [
+const volumeFormat = { type: "volume" as const };
+const quietSeries = { priceLineVisible: false, lastValueVisible: false };
+
+export const indicatorGroups: Array<{
+  id: IndicatorCategory;
+  label: string;
+}> = [
   { id: "market-data", label: "Market Data" },
   { id: "analytics", label: "Analytics" },
 ];
@@ -46,19 +74,23 @@ export const indicatorRegistry: Record<IndicatorId, IndicatorDefinition> = {
     defaultVisible: true,
     requires: ["volume_shares"],
     normalization: null,
-    transform: (bars, theme) => toVolume(bars, { up: theme.volumeUp, down: theme.volumeDown }),
     valueFormatter: formatCompact,
     rendering: {
-      seriesType: "histogram",
-      paneIndex: 1,
       paneLabel: "VOLUME · SHARES",
       paneLabelClassName: "pane-label--volume",
       testId: "volume-pane",
-      options: {
-        priceFormat: { type: "volume" },
-        priceLineVisible: false,
-        lastValueVisible: false,
-      },
+      series: [
+        {
+          id: "volume",
+          seriesType: "histogram",
+          transform: (bars, theme) =>
+            toVolume(bars, { up: theme.volumeUp, down: theme.volumeDown }),
+          options: {
+            priceFormat: volumeFormat,
+            ...quietSeries,
+          },
+        },
+      ],
     },
   },
   "frequency-analyzer": {
@@ -67,25 +99,94 @@ export const indicatorRegistry: Record<IndicatorId, IndicatorDefinition> = {
     category: "analytics",
     kind: "pane",
     defaultVisible: false,
-    requires: ["volume_shares", "frequency", "frequency_analyzer_raw_shares"],
+    requires: [
+      "volume_shares",
+      "frequency",
+      "frequency_analyzer_raw_shares",
+    ],
     normalization: "log10(raw shares)",
-    transform: toFrequencyAnalyzer,
     valueFormatter: (value) => {
       const parsed = toNumber(value);
       return parsed === null ? "—" : parsed.toFixed(4);
     },
     rendering: {
-      seriesType: "histogram",
-      paneIndex: 2,
       paneLabel: "FREQUENCY ANALYZER · LOG10(RAW SHARES)",
       paneLabelClassName: "pane-label--frequency",
       testId: "frequency-analyzer-pane",
-      options: {
-        priceLineVisible: false,
-        lastValueVisible: true,
-        priceFormat: { type: "custom", formatter: (value: number) => value.toFixed(2) },
-      },
-      colorToken: "--indicator-fa",
+      series: [
+        {
+          id: "frequency-analyzer",
+          seriesType: "histogram",
+          transform: toFrequencyAnalyzer,
+          options: {
+            priceLineVisible: false,
+            lastValueVisible: true,
+            priceFormat: {
+              type: "custom",
+              formatter: (value: number) => value.toFixed(2),
+            },
+          },
+          colorToken: "--indicator-fa",
+        },
+      ],
+    },
+  },
+  "foreign-analysis": {
+    id: "foreign-analysis",
+    label: "Foreign Analysis",
+    category: "analytics",
+    kind: "pane",
+    defaultVisible: false,
+    requires: [
+      "foreign_buy_shares",
+      "foreign_sell_shares",
+      "foreign_net_shares",
+      "cumulative_foreign_net_shares",
+    ],
+    normalization: "Raw shares · daily and cumulative",
+    valueFormatter: formatCompact,
+    rendering: {
+      paneLabel: "FOREIGN · BUY / SELL / NET / CUMULATIVE SHARES",
+      paneLabelClassName: "pane-label--foreign",
+      testId: "foreign-analysis-pane",
+      series: [
+        {
+          id: "buy",
+          seriesType: "line",
+          transform: toForeignBuy,
+          options: { ...quietSeries, lineWidth: 1, priceFormat: volumeFormat },
+          colorToken: "--market-up",
+        },
+        {
+          id: "sell",
+          seriesType: "line",
+          transform: toForeignSell,
+          options: { ...quietSeries, lineWidth: 1, priceFormat: volumeFormat },
+          colorToken: "--market-down",
+        },
+        {
+          id: "net",
+          seriesType: "histogram",
+          transform: (bars, theme) =>
+            toForeignNet(bars, {
+              up: theme.volumeUp,
+              down: theme.volumeDown,
+            }),
+          options: { ...quietSeries, priceFormat: volumeFormat },
+        },
+        {
+          id: "cumulative",
+          seriesType: "line",
+          transform: toCumulativeForeignNet,
+          options: {
+            priceLineVisible: false,
+            lastValueVisible: true,
+            lineWidth: 2,
+            priceFormat: volumeFormat,
+          },
+          colorToken: "--accent",
+        },
+      ],
     },
   },
 };

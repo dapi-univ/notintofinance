@@ -1,6 +1,12 @@
 "use client";
 
-import type { IChartApi, ISeriesApi, SeriesDefinition } from "lightweight-charts";
+import type {
+  HistogramSeriesPartialOptions,
+  IChartApi,
+  ISeriesApi,
+  LineSeriesPartialOptions,
+  SeriesDefinition,
+} from "lightweight-charts";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { HistoryBar } from "@/lib/api/types";
@@ -12,6 +18,7 @@ import {
   type IndicatorDefinition,
   type IndicatorId,
   type IndicatorRenderTheme,
+  type IndicatorSeriesDefinition,
 } from "@/lib/indicators/registry";
 
 type Props = {
@@ -21,6 +28,10 @@ type Props = {
   chartType: ChartType;
   enabledIndicators: ReadonlySet<IndicatorId>;
 };
+
+type ChartIndicatorSeries =
+  | ISeriesApi<"Histogram">
+  | ISeriesApi<"Line">;
 
 function cssColor(styles: CSSStyleDeclaration, token: string, fallback: string): string {
   return styles.getPropertyValue(token).trim() || fallback;
@@ -43,7 +54,10 @@ export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicat
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const lineRef = useRef<ISeriesApi<"Area"> | null>(null);
   const histogramDefinitionRef = useRef<SeriesDefinition<"Histogram"> | null>(null);
-  const indicatorSeriesRef = useRef(new Map<IndicatorId, ISeriesApi<"Histogram">>());
+  const lineDefinitionRef = useRef<SeriesDefinition<"Line"> | null>(null);
+  const indicatorSeriesRef = useRef(
+    new Map<IndicatorId, Map<string, ChartIndicatorSeries>>(),
+  );
   const indicatorThemeRef = useRef<IndicatorRenderTheme>({
     volumeUp: "transparent",
     volumeDown: "transparent",
@@ -63,7 +77,15 @@ export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicat
     const indicatorSeries = indicatorSeriesRef.current;
     async function initialize() {
       if (!containerRef.current) return;
-      const { AreaSeries, CandlestickSeries, ColorType, HistogramSeries, CrosshairMode, createChart } = await import("lightweight-charts");
+      const {
+        AreaSeries,
+        CandlestickSeries,
+        ColorType,
+        HistogramSeries,
+        LineSeries,
+        CrosshairMode,
+        createChart,
+      } = await import("lightweight-charts");
       if (disposed || !containerRef.current) return;
       const styles = getComputedStyle(document.documentElement);
       const background = cssColor(styles, "--bg-chart", "#141716");
@@ -130,6 +152,7 @@ export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicat
       candleRef.current = candles;
       lineRef.current = line;
       histogramDefinitionRef.current = HistogramSeries;
+      lineDefinitionRef.current = LineSeries;
       observer = new ResizeObserver(() => {
         if (containerRef.current) chart.resize(containerRef.current.clientWidth, containerRef.current.clientHeight);
       });
@@ -145,6 +168,7 @@ export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicat
       candleRef.current = null;
       lineRef.current = null;
       histogramDefinitionRef.current = null;
+      lineDefinitionRef.current = null;
       indicatorSeries.clear();
     };
   }, []);
@@ -165,7 +189,8 @@ export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicat
   useEffect(() => {
     const chart = chartRef.current;
     const histogramDefinition = histogramDefinitionRef.current;
-    if (!ready || !chart || !histogramDefinition) return;
+    const lineDefinition = lineDefinitionRef.current;
+    if (!ready || !chart || !histogramDefinition || !lineDefinition) return;
 
     syncIndicatorSeries({
       bars: filteredBars,
@@ -173,22 +198,35 @@ export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicat
       enabled: enabledIndicators,
       theme: indicatorThemeRef.current,
       seriesById: indicatorSeriesRef.current,
-      createSeries: (definition: IndicatorDefinition) => {
+      createSeries: (
+        definition: IndicatorDefinition,
+        seriesDefinition: IndicatorSeriesDefinition,
+      ) => {
         const styles = getComputedStyle(document.documentElement);
-        const tokenColor = definition.rendering.colorToken
-          ? cssColor(styles, definition.rendering.colorToken, "#20d978")
+        const tokenColor = seriesDefinition.colorToken
+          ? cssColor(styles, seriesDefinition.colorToken, "#20d978")
           : undefined;
-        return chart.addSeries(
-          histogramDefinition,
-          tokenColor
-            ? { ...definition.rendering.options, color: tokenColor }
-            : definition.rendering.options,
-          definition.rendering.paneIndex,
-        );
+        const options = tokenColor
+          ? { ...seriesDefinition.options, color: tokenColor }
+          : seriesDefinition.options;
+        const paneIndex = enabledDefinitions.findIndex(
+          (item) => item.id === definition.id,
+        ) + 1;
+        return seriesDefinition.seriesType === "histogram"
+          ? chart.addSeries(
+              histogramDefinition,
+              options as HistogramSeriesPartialOptions,
+              paneIndex,
+            )
+          : chart.addSeries(
+              lineDefinition,
+              options as LineSeriesPartialOptions,
+              paneIndex,
+            );
       },
       removeSeries: (series) => chart.removeSeries(series),
     });
-  }, [enabledIndicators, filteredBars, ready]);
+  }, [enabledDefinitions, enabledIndicators, filteredBars, ready]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -201,7 +239,9 @@ export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicat
       nextTicker: ticker,
       chart,
       priceSeries: [candles, line],
-      indicatorSeries: indicatorSeriesRef.current.values(),
+      indicatorSeries: Array.from(
+        indicatorSeriesRef.current.values(),
+      ).flatMap((group) => Array.from(group.values())),
     });
     previousTickerRef.current = ticker;
   }, [ready, ticker]);
@@ -217,9 +257,17 @@ export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicat
         panes[1].setHeight(Math.round(height * 0.25));
         return;
       }
-      panes[0].setHeight(Math.round(height * 0.67));
-      panes[1].setHeight(Math.round(height * 0.14));
-      panes[2]?.setHeight(Math.round(height * 0.19));
+      const priceRatio = enabledDefinitions.length === 2 ? 0.67 : 0.62;
+      const volumeRatio = enabledDefinitions.length === 2 ? 0.14 : 0.12;
+      panes[0].setHeight(Math.round(height * priceRatio));
+      panes[1].setHeight(Math.round(height * volumeRatio));
+      const remaining = 1 - priceRatio - volumeRatio;
+      const analyticsCount = enabledDefinitions.length - 1;
+      for (let index = 0; index < analyticsCount; index += 1) {
+        panes[index + 2]?.setHeight(
+          Math.round((height * remaining) / analyticsCount),
+        );
+      }
     });
     return () => cancelAnimationFrame(frame);
   }, [enabledDefinitions.length, ready]);

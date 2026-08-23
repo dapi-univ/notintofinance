@@ -19,6 +19,10 @@ const bars: HistoryBar[] = [
     frequency: 10,
     frequency_analyzer_raw_shares: 3,
     frequency_analyzer_raw_lots: 0.03,
+    foreign_buy_shares: 600,
+    foreign_sell_shares: 400,
+    foreign_net_shares: 200,
+    cumulative_foreign_net_shares: 200,
   },
 ];
 
@@ -37,11 +41,14 @@ class FakeSeries {
 
 describe("generic indicator series lifecycle", () => {
   it("creates, updates, and removes enabled registry series by indicator id", () => {
-    const seriesById = new Map<IndicatorId, FakeSeries>();
-    const createdIds: IndicatorId[] = [];
-    const removeSeries = vi.fn();
-    const createSeries = vi.fn((definition: (typeof indicatorDefinitions)[number]) => {
-      createdIds.push(definition.id);
+    const seriesById = new Map<IndicatorId, Map<string, FakeSeries>>();
+    const createdIds: string[] = [];
+    const removeSeries = vi.fn<(series: FakeSeries) => void>();
+    const createSeries = vi.fn((
+      definition: (typeof indicatorDefinitions)[number],
+      seriesDefinition: (typeof indicatorDefinitions)[number]["rendering"]["series"][number],
+    ) => {
+      createdIds.push(`${definition.id}:${seriesDefinition.id}`);
       return new FakeSeries();
     });
 
@@ -54,7 +61,7 @@ describe("generic indicator series lifecycle", () => {
       createSeries,
       removeSeries,
     });
-    const volumeSeries = seriesById.get("volume");
+    const volumeSeries = seriesById.get("volume")?.get("volume");
 
     syncIndicatorSeries({
       bars,
@@ -65,9 +72,14 @@ describe("generic indicator series lifecycle", () => {
       createSeries,
       removeSeries,
     });
-    const frequencySeries = seriesById.get("frequency-analyzer");
+    const frequencySeries = seriesById
+      .get("frequency-analyzer")
+      ?.get("frequency-analyzer");
 
-    expect(createdIds).toEqual(["volume", "frequency-analyzer"]);
+    expect(createdIds).toEqual([
+      "volume:volume",
+      "frequency-analyzer:frequency-analyzer",
+    ]);
     expect(volumeSeries?.updates).toHaveLength(2);
     expect(volumeSeries?.updates[0]).toEqual([
       { time: "2026-08-21", value: 3000, color: theme.volumeUp },
@@ -89,6 +101,40 @@ describe("generic indicator series lifecycle", () => {
     expect(removeSeries).toHaveBeenCalledOnce();
     expect(removeSeries).toHaveBeenCalledWith(frequencySeries);
     expect(seriesById.has("frequency-analyzer")).toBe(false);
-    expect(seriesById.get("volume")).toBe(volumeSeries);
+    expect(seriesById.get("volume")?.get("volume")).toBe(volumeSeries);
+  });
+
+  it("creates all foreign analysis series and removes them as one indicator", () => {
+    const seriesById = new Map<IndicatorId, Map<string, FakeSeries>>();
+    const removeSeries = vi.fn<(series: FakeSeries) => void>();
+    syncIndicatorSeries({
+      bars,
+      definitions: indicatorDefinitions,
+      enabled: new Set<IndicatorId>(["volume", "foreign-analysis"]),
+      theme,
+      seriesById,
+      createSeries: () => new FakeSeries(),
+      removeSeries,
+    });
+
+    expect(Array.from(seriesById.get("foreign-analysis")?.keys() ?? [])).toEqual([
+      "buy",
+      "sell",
+      "net",
+      "cumulative",
+    ]);
+
+    syncIndicatorSeries({
+      bars,
+      definitions: indicatorDefinitions,
+      enabled: new Set<IndicatorId>(["volume"]),
+      theme,
+      seriesById,
+      createSeries: () => new FakeSeries(),
+      removeSeries,
+    });
+
+    expect(removeSeries).toHaveBeenCalledTimes(4);
+    expect(seriesById.has("foreign-analysis")).toBe(false);
   });
 });

@@ -56,3 +56,44 @@ export function toFrequencyAnalyzer(bars: HistoryBar[]) {
     return [{ time: bar.date, value: Math.log10(raw) }];
   });
 }
+
+export function toForeignBuy(bars: HistoryBar[]) {
+  return bars.flatMap((bar) =>
+    bar.foreign_buy_shares === null
+      ? []
+      : [{ time: bar.date, value: bar.foreign_buy_shares }],
+  );
+}
+
+export function toForeignSell(bars: HistoryBar[]) {
+  return bars.flatMap((bar) =>
+    bar.foreign_sell_shares === null
+      ? []
+      : [{ time: bar.date, value: bar.foreign_sell_shares }],
+  );
+}
+
+export function toForeignNet(
+  bars: HistoryBar[],
+  colors: VolumeHistogramColors,
+) {
+  return bars.flatMap((bar) =>
+    bar.foreign_net_shares === null
+      ? []
+      : [
+          {
+            time: bar.date,
+            value: bar.foreign_net_shares,
+            color: bar.foreign_net_shares >= 0 ? colors.up : colors.down,
+          },
+        ],
+  );
+}
+
+export function toCumulativeForeignNet(bars: HistoryBar[]) {
+  return bars.flatMap((bar) =>
+    bar.cumulative_foreign_net_shares === null
+      ? []
+      : [{ time: bar.date, value: bar.cumulative_foreign_net_shares }],
+  );
+}

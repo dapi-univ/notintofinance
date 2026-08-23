@@ -6,7 +6,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: "line",
   use: {
-    baseURL: "http://127.0.0.1:3000",
+    baseURL: "http://127.0.0.1:3100",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
@@ -18,16 +18,26 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "uv run --project ../api uvicorn app.main:app --host 127.0.0.1 --port 8000",
-      url: "http://127.0.0.1:8000/health",
-      env: { ...process.env, APP_ENV: "test", MARKET_DATA_PROVIDER: "mock" },
-      reuseExistingServer: !process.env.CI,
+      command: "uv run --project ../api uvicorn app.main:app --host 127.0.0.1 --port 8100",
+      url: "http://127.0.0.1:8100/health",
+      env: {
+        ...process.env,
+        APP_ENV: "test",
+        CORS_ORIGINS: "http://127.0.0.1:3100",
+        DATABASE_URL: "",
+        MARKET_DATA_PROVIDER: "mock",
+      },
+      reuseExistingServer: false,
       timeout: 120_000,
     },
     {
-      command: "npm run dev",
-      url: "http://127.0.0.1:3000/app",
-      reuseExistingServer: !process.env.CI,
+      command: "npm run build && npm run start -- --port 3100",
+      url: "http://127.0.0.1:3100/app",
+      env: {
+        ...process.env,
+        NEXT_PUBLIC_API_BASE_URL: "http://127.0.0.1:8100",
+      },
+      reuseExistingServer: false,
       timeout: 120_000,
     },
   ],

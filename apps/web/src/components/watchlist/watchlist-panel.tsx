@@ -30,6 +30,10 @@ export function WatchlistPanel({ stocks, selectedTicker, loading, error, onRetry
         : stocks,
     [deferredSearch, stocks],
   );
+  const readyCount = useMemo(
+    () => filtered.filter((stock) => stock.has_history).length,
+    [filtered],
+  );
 
   return (
     <aside className="watchlist" aria-label="Stock watchlist">
@@ -71,7 +75,7 @@ export function WatchlistPanel({ stocks, selectedTicker, loading, error, onRetry
           : null}
       </div>
       <footer className="watchlist__footer">
-        <span>{filtered.length} symbols</span>
+        <span>{readyCount} ready · {filtered.length} symbols</span>
         <span>EOD</span>
       </footer>
     </aside>
