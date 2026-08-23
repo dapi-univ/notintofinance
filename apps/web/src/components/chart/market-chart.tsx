@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { HistoryBar } from "@/lib/api/types";
 import { filterBarsByTimeframe, toCandles, toLine, type ChartType, type Timeframe } from "@/lib/chart/adapter";
 import { syncIndicatorSeries } from "@/lib/chart/indicator-series";
+import { resetTickerViewport } from "@/lib/chart/viewport";
 import {
   indicatorDefinitions,
   type IndicatorDefinition,
@@ -14,6 +15,7 @@ import {
 } from "@/lib/indicators/registry";
 
 type Props = {
+  ticker: string;
   bars: HistoryBar[];
   timeframe: Timeframe;
   chartType: ChartType;
@@ -35,7 +37,7 @@ function colorWithOpacity(color: string, opacity: number): string {
   return rgb ? `rgba(${rgb[1]}, ${rgb[2]}, ${rgb[3]}, ${opacity})` : color;
 }
 
-export function MarketChart({ bars, timeframe, chartType, enabledIndicators }: Props) {
+export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicators }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -47,6 +49,7 @@ export function MarketChart({ bars, timeframe, chartType, enabledIndicators }: P
     volumeDown: "transparent",
   });
   const paneLabelRefs = useRef(new Map<"price" | IndicatorId, HTMLDivElement>());
+  const previousTickerRef = useRef(ticker);
   const [ready, setReady] = useState(false);
   const filteredBars = useMemo(() => filterBarsByTimeframe(bars, timeframe), [bars, timeframe]);
   const enabledDefinitions = useMemo(
@@ -186,6 +189,22 @@ export function MarketChart({ bars, timeframe, chartType, enabledIndicators }: P
       removeSeries: (series) => chart.removeSeries(series),
     });
   }, [enabledIndicators, filteredBars, ready]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    const candles = candleRef.current;
+    const line = lineRef.current;
+    if (!ready || !chart || !candles || !line) return;
+
+    resetTickerViewport({
+      previousTicker: previousTickerRef.current,
+      nextTicker: ticker,
+      chart,
+      priceSeries: [candles, line],
+      indicatorSeries: indicatorSeriesRef.current.values(),
+    });
+    previousTickerRef.current = ticker;
+  }, [ready, ticker]);
 
   useEffect(() => {
     if (!ready) return;

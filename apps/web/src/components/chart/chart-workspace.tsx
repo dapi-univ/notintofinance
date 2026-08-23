@@ -70,7 +70,7 @@ export function ChartWorkspace({ ticker, history, loading, fetching, error, onRe
         {error ? <ChartState kind="error" onRetry={onRetry} /> : null}
         {!loading && !error && !hasData ? <ChartState kind="empty" /> : null}
         {!loading && !error && hasData && validHistory ? (
-          <MarketChart bars={validHistory.bars} timeframe={timeframe} chartType={chartType} enabledIndicators={enabledIndicators} />
+          <MarketChart ticker={ticker} bars={validHistory.bars} timeframe={timeframe} chartType={chartType} enabledIndicators={enabledIndicators} />
         ) : null}
         {fetching && hasData ? (
           <div className="chart-refresh" role="status"><RefreshCw aria-hidden="true" size={13} /> Updating {ticker}</div>
