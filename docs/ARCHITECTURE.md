@@ -12,12 +12,14 @@ The production data path is:
 
 Phase 1 adds a provider-neutral operational path alongside the stable dashboard path:
 
-`Zapi / Pluang -> quota-aware transport -> sanitized raw staging -> typed normalization -> warehouse repositories -> Supabase PostgreSQL -> FastAPI`
+`Zapi finance:idx / finance:pluang -> quota-aware transport -> sanitized raw staging -> typed normalization -> warehouse repositories -> Supabase PostgreSQL -> FastAPI`
 
-Provider instrument identifiers are mappings only; `stocks.id` remains canonical. Pluang is
-used for instrument resolution and bounded broker-flow, running-trade, and orderbook
-collection. Orderbook rows are resting-liquidity snapshots, running trades are executed
-prints without broker identity, and broker summaries explicitly retain their top-10 scope.
+Provider instrument identifiers are optional mappings only; `stocks.id` and the IDX ticker
+remain canonical. Pluang-source broker-flow, running-trade and orderbook data is requested
+only through Zapi's documented `finance:pluang` namespace with the server-side Zapi key.
+There is no direct-upstream fallback or browser-header impersonation. Orderbook rows are
+resting-liquidity snapshots, running trades are executed prints without broker identity, and
+broker summaries explicitly retain their capped top-10 scope.
 
 When `DATABASE_URL` or `ZAPI_API_KEY` is unavailable, development starts with the explicit `mock` provider and an in-memory repository. Mock responses include `is_mock: true`, and the web workspace shows a persistent `MOCK DATA` badge. Mock mode is never presented as live market data.
 
@@ -34,9 +36,11 @@ bounded worker pool, recent-window refreshes, idempotent database upserts, and p
 checkpoints. One ticker failure is recorded without rolling back other completed symbols.
 Normal API reads do not instantiate or call the provider.
 
-Every provider attempt is fingerprinted without credentials and recorded with latency,
-status, attempt number, row count, cache status, and available quota headers. Zapi ingestion
-stops non-critical work at the configured daily soft budget or 2,500-request monthly reserve.
+Every gateway attempt is fingerprinted without credentials and recorded with latency,
+status, attempt number, row count, cache status, and available quota headers. Both
+`finance:idx` and `finance:pluang` consume one shared Zapi budget initialized from the latest
+persisted monthly-remaining observation. Zapi ingestion stops non-critical work at the
+configured daily soft budget or 2,500-request monthly reserve.
 Canaries have a separate hard request cap. Advisory locks prevent concurrent ingestion of
 the same dataset session.
 
@@ -56,4 +60,5 @@ roles have no grants; the application does not use Supabase Auth, Storage, Realt
 Functions.
 
 Raw provider payloads are sanitized, backend-only, hash-deduplicated, and assigned a bounded
-expiry. They are never returned from API routes.
+expiry. Gateway and normalized source provenance are stored separately. They are never
+returned from API routes.

@@ -49,3 +49,23 @@ def test_warehouse_migration_chain_and_security_contract() -> None:
     cleanup_spec.loader.exec_module(cleanup)
     assert cleanup.revision == "20260823081000"
     assert cleanup.down_revision == "20260823080000"
+
+    corrective_path = (
+        root
+        / "apps/api/migrations/versions/20260823084324_add_gateway_provenance_and_partial_cursor.py"
+    )
+    corrective_spec = importlib.util.spec_from_file_location(
+        "warehouse_gateway_correction", corrective_path
+    )
+    assert corrective_spec and corrective_spec.loader
+    corrective = importlib.util.module_from_spec(corrective_spec)
+    corrective_spec.loader.exec_module(corrective)
+    corrective_sql = (
+        root
+        / "supabase/migrations/20260823084324_add_gateway_provenance_and_partial_cursor.sql"
+    ).read_text(encoding="utf-8")
+    assert corrective.revision == "20260823084324"
+    assert corrective.down_revision == "20260823081000"
+    assert "add column gateway text" in corrective_sql
+    assert "add column source_provider text" in corrective_sql
+    assert "'partial'" in corrective_sql

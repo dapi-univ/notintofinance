@@ -156,3 +156,34 @@ def test_request_fingerprint_redacts_sensitive_parameters() -> None:
     first = request_fingerprint("endpoint", {"code": "BBCA", "token": "first"})
     second = request_fingerprint("endpoint", {"code": "BBCA", "token": "second"})
     assert first == second
+
+
+async def test_idx_and_pluang_namespaces_share_one_zapi_request_budget() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, request=request, json={"data": {}})
+
+    budget = RequestBudget(run_limit=1)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        idx = QuotaAwareTransport(provider="zapi", client=client, budget=budget)
+        pluang = QuotaAwareTransport(provider="zapi", client=client, budget=budget)
+        await idx.get_json(
+            dataset="finance:idx/stock-history",
+            endpoint_name="finance:idx/stock-history",
+            url="https://provider.invalid/finance:idx/stock-history",
+            params={"code": "BBCA"},
+            headers={"x-api-key": "fixture-key"},
+        )
+        with pytest.raises(ProviderBudgetExceeded, match="run request cap"):
+            await pluang.get_json(
+                dataset="finance:pluang/orderbook",
+                endpoint_name="finance:pluang/orderbook",
+                url="https://provider.invalid/finance:pluang/orderbook",
+                params={"code": "BBCA"},
+                headers={"x-api-key": "fixture-key"},
+            )
+
+    assert calls == 1

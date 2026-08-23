@@ -1,1 +1,5 @@
-{"data":{"id":10020},"statusCode":200,"timestamp":"2026-08-23T07:01:32.450Z"}
+{
+  "data": {"code": "BBCA", "source": "pluang", "stockId": 10020},
+  "project": "finance:pluang",
+  "timestamp": "2026-08-23T08:21:00Z"
+}

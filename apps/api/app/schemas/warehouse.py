@@ -28,7 +28,7 @@ class BrokerFlowRecord(BaseModel):
     average_price: Decimal = Field(ge=0)
     provider: str = "pluang"
     source_scope: str = "top_n"
-    source_top_n: int = Field(default=10, gt=0)
+    source_top_n: int | None = Field(default=10, gt=0)
 
 
 class TradePrintRecord(BaseModel):
@@ -66,6 +66,7 @@ class RunningTradesPage(BaseModel):
 
 
 class IngestionCursorState(BaseModel):
+    instrument_key: str
     session_date: date | None
     cursor_value: str | None
     high_water_mark: str | None
@@ -74,6 +75,8 @@ class IngestionCursorState(BaseModel):
 
 class RawPayloadRecord(BaseModel):
     provider: str
+    gateway: str
+    source_provider: str
     dataset: str
     instrument_key: str | None = None
     date_from: date | None = None

@@ -55,6 +55,8 @@ class RawProviderPayload(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     provider: Mapped[str] = mapped_column(Text)
+    gateway: Mapped[str] = mapped_column(Text)
+    source_provider: Mapped[str] = mapped_column(Text)
     dataset: Mapped[str] = mapped_column(Text)
     instrument_key: Mapped[str | None] = mapped_column(Text)
     date_from: Mapped[date | None] = mapped_column(Date)

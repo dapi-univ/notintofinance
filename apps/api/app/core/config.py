@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     market_data_provider: str = "zapi"
     zapi_api_key: str | None = None
     zapi_base_url: str = "https://api.zpi.web.id/v1/finance:idx"
-    pluang_base_url: str = "https://indo-stock-api-v2.pluang.com/api/v2/indo-stock"
+    zapi_pluang_base_url: str = "https://api.zpi.web.id/v1/finance:pluang"
     provider_concurrency: int = Field(default=2, ge=1, le=10)
     provider_timeout_seconds: float = Field(default=30, gt=0, le=120)
     provider_daily_soft_budget: int = Field(default=800, ge=1)

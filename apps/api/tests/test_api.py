@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import Settings
 from app.main import create_app
+from app.services.trade_cursor import InvalidTradeCursor
 
 
 class FakeWarehouseService:
@@ -17,8 +18,10 @@ class FakeWarehouseService:
         date_to: object,
         *,
         limit: int,
-        cursor: int | None,
+        cursor: str | None,
     ) -> dict[str, object]:
+        if cursor:
+            raise InvalidTradeCursor("invalid or incompatible trade cursor")
         return {"ticker": ticker, "rows": [], "next_cursor": None}
 
     async def latest_orderbook(self, ticker: str) -> dict[str, object]:
@@ -154,3 +157,15 @@ def test_warehouse_routes_enforce_bounded_ranges() -> None:
 
     assert broker.status_code == 422
     assert trades.status_code == 422
+
+
+def test_trade_route_rejects_malformed_opaque_cursor() -> None:
+    app = create_app(Settings(app_env="test", market_data_provider="mock", database_url=None))
+    with TestClient(app) as client:
+        app.state.warehouse_service = FakeWarehouseService()
+        response = client.get(
+            "/stocks/BBCA/trades?from=2026-08-21&to=2026-08-21&cursor=invalid"
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid or incompatible trade cursor"

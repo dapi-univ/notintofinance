@@ -20,11 +20,14 @@ async def _run(args: argparse.Namespace) -> None:
     warehouse = PostgresWarehouseRepository(
         database, raw_retention_days=settings.raw_payload_retention_days
     )
+    latest_quota = await warehouse.latest_quota("zapi")
+    remaining_month = latest_quota.get("remaining_month") if latest_quota else None
     budget = RequestBudget(
         daily_soft_limit=args.daily_budget or settings.provider_daily_soft_budget,
         monthly_reserve=settings.provider_monthly_reserve,
         run_limit=args.request_cap,
         requests_today=await warehouse.requests_today("zapi"),
+        remaining_month=remaining_month if isinstance(remaining_month, int) else None,
     )
     transport = QuotaAwareTransport(
         provider="zapi",
@@ -44,6 +47,8 @@ async def _run(args: argparse.Namespace) -> None:
         await warehouse.stage_raw_payload(
             RawPayloadRecord(
                 provider="zapi",
+                gateway="zapi",
+                source_provider="idx",
                 dataset=dataset,
                 instrument_key=instrument_key,
                 payload=payload,

@@ -1,65 +1,79 @@
-# Pluang Market Data Inventory
+# Zapi finance:pluang Market Data Inventory
 
-Verified against the official Pluang web application and live responses on 2026-08-23.
-Credentials, sensitive headers, full URLs, and raw production payloads are intentionally
-omitted. The public web client uses a wrapped response envelope:
+Verified against Zapi's documented `finance:pluang` reference and authenticated normalized
+responses on 2026-08-23. Production requests use only:
 
-`{"data": ..., "statusCode": 200, "timestamp": "..."}`
+`https://api.zpi.web.id/v1/finance:pluang`
 
-The collector validates `statusCode`, object envelopes, numeric fields, timestamps and units
-before persistence. Phase 1 uses at most three symbols, three cursor pages per symbol and one
-orderbook snapshot per symbol for microstructure collection.
+with the server-side `x-api-key`. The normalized data source remains `pluang`; the API gateway
+and quota owner are `zapi`. No browser impersonation headers or direct-upstream fallback are
+used. Keys, authenticated URLs and production payload values are omitted from this document.
 
-## Instrument mapping
+Live responses use a Zapi envelope:
 
-- Sanitized path: `GET /api/v2/indo-stock/description-by-code`
-- Parameter: `stockCode` (canonical IDX ticker)
-- Response data: `{ "id": <positive integer> }`
-- Canonical mapping: `data.id` -> provider instrument ID; the ticker and internal
-  `stocks.id` remain canonical KEJORA identities.
-- Observed canary mappings: AADI, BBCA and TLKM resolved uniquely.
+`{"data": {...}, "project": "...", "timestamp": "..."}`
 
-## Broker summary
+The nested normalized object must carry `source="pluang"` and the requested canonical IDX
+ticker. Both `finance:idx` and `finance:pluang` consume the same persisted Zapi quota budget.
 
-- Sanitized path: `GET /api/v2/indo-stock/broker/summary`
-- Parameters: `stockId`, `startDate`, `endDate`, `net`
-- Response data: `startDate`, `endDate`, `net`, `brokerSummary[]`
-- Each ranked row pairs buyer and seller code, lot volume, IDR value and average price.
-- Coverage: top buyers/sellers, normally top 10. KEJORA persists
-  `source_scope='top_n'` and `source_top_n=10`; it never represents this as complete broker
-  coverage.
-- Units: lots, IDR and IDR/share average price. Shares are derived as `lots * 100`.
+## Instrument resolution
+
+- Path: `GET /resolve`
+- Parameters: `code` (required canonical IDX ticker).
+- Data: `code`, `source`, `stockId`.
+- Use: optional cached metadata or a small validation canary only. Broker, trade and orderbook
+  endpoints accept `code` directly, so a 962-ticker resolve pass is not required.
+
+## Per-stock broker summary
+
+- Path: `GET /broker-summary`
+- Parameters: `code`, `startDate`, `endDate`, `net=true`.
+- Data: `buyers[]`, `sellers[]`, `capped`, `count`, range, source and optional `stockId`.
+- Row fields: canonical IDX broker `broker`, `lots`, IDR `value`, and `averagePrice`.
+- Coverage: `capped=true` is persisted as `source_scope='top_n'` with the documented count in
+  `source_top_n`; it is never represented as complete-market broker flow.
+- Units: one lot is converted deterministically to 100 shares.
+
+This is distinct from `finance:idx/broker-summary`, which is market-wide broker activity and
+does not provide a stock ticker or BUY/SELL side. It is reserved as a separate future dataset
+and is not substituted for per-stock flow.
 
 ## Running trades
 
-- Sanitized path: `GET /api/v2/indo-stock/market-feed/running-trades`
-- Parameters: `stockId`; subsequent pages use `next=<opaque cursor>`.
-- Response data: `rt[]` and `next`.
-- Print fields: `seq`, `time`, `price`, `lot`, and `action` (`BUY`/`SELL`).
-- Contract: executed prints; no broker identity is present or inferred.
-- The stored session date is the latest confirmed PostgreSQL market date, and time-of-day is
-  interpreted in `Asia/Jakarta` before storing a timezone-aware timestamp.
+- Path: `GET /running-trades`
+- Parameters: `code`; continuation uses `cursor=<opaque nextCursor>`.
+- Data: `items[]`, `nextCursor`, `count`, `source`, and optional `stockId`.
+- Item fields: `sequence`, Jakarta `time`, `price`, `lots`, and BUY/SELL `action`.
+- Contract: executed prints without broker identity.
 - Uniqueness: canonical stock, provider, session date and provider sequence.
-- A page cap with a non-empty `next` token is stored as resumable partial progress, not a
-  completed cursor. The next canary run for the same session continues from that token.
+- Cursor state: an active worker uses `running`; a page-capped exit retaining `nextCursor`
+  uses `partial`.
 
 ## Orderbook
 
-- Sanitized path: `GET /api/v2/indo-stock/market-feed/orderbook`
-- Parameter: `stockId`
-- Response data: `bids[]`, `asks[]`, subscription metadata and side percentages.
-- Level fields: `p` (price) and `l` (lots). Best bid/ask and spread are derived from validated
-  levels.
-- Contract: resting liquidity observed at the response timestamp. Levels may be cancelled
-  and are never labelled as executed volume.
+- Path: `GET /orderbook`
+- Parameter: `code`.
+- Data: normalized `bids[]` and `asks[]` containing `price` and `lots`, best prices and side
+  counts/percentages.
+- Observation time: the outer Zapi envelope timestamp.
+- Contract: resting liquidity that may be cancelled; it is never labelled executed volume.
 
-## Operational observations
+## Reserved later endpoint
 
-- The official client sends no cookie, authorization bearer or API key for these market-data
-  reads; it supplies ordinary browser content-negotiation, language, request-ID and referrer
-  headers.
-- Pluang did not return Zapi-style quota headers. This is recorded as an undocumented quota,
-  not interpreted as unlimited capacity. KEJORA therefore enforces its own daily and canary
-  caps.
-- A live three-symbol canary used three pages per running-trades cursor, one broker request
-  and one orderbook request per symbol. No mass intraday collection is part of Phase 1.
+`GET /tradebook` is documented but intentionally not ingested in Phase 1.1. It is reserved for
+the later Frequency Analyzer research phase after audit approval.
+
+## Quota and retry contract
+
+- Request ledger gateway: `zapi`.
+- Endpoint names: `finance:pluang/<endpoint>`.
+- Parse and persist Zapi limit, minute remaining, month remaining and plan-expired headers.
+- Missing or malformed quota headers remain explicit warnings, never unlimited capacity.
+- The first request initializes monthly remaining from the latest persisted Zapi ledger row.
+- Network failures, HTTP 429 and 5xx use bounded retry; `Retry-After` is honored exactly.
+- Ordinary 4xx responses are not blindly retried.
+- A 2,500-request monthly reserve, daily soft budget and strict canary cap remain enforced.
+
+Raw staging stores the complete normalized Zapi envelope with `gateway='zapi'` and
+`source_provider='pluang'`. Existing historical direct-source records and ledger events are
+retained unchanged.

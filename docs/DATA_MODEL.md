@@ -21,8 +21,8 @@ The authoritative schema is the SQL migration under `supabase/migrations`.
   replacing `stocks.id`; mapping outcomes are mapped, unsupported, ambiguous, or transient.
 - `provider_request_ledger` stores sanitized request fingerprints, attempts, latency, status,
   cache and quota observations. It never stores authenticated URLs or headers.
-- `raw_provider_payloads` is bounded, hash-deduplicated staging with explicit normalization
-  status and expiry.
+- `raw_provider_payloads` is bounded, hash-deduplicated staging with explicit gateway,
+  normalized source, normalization status and expiry.
 - `broker_flow_daily` stores one typed buy/sell row per ranked broker and date range. Pluang
   rows have `source_scope='top_n'` and `source_top_n=10`; they are not complete-market flow.
 - `trade_prints` stores executed prints uniquely by stock, provider, session and provider
@@ -31,6 +31,7 @@ The authoritative schema is the SQL migration under `supabase/migrations`.
   resting bid/ask liquidity. They are not executed volume.
 - `data_quality_events` classifies retryability and terminal failures with sanitized context.
 - `ingestion_cursors` persists cursor/high-water progress for resumable cursor datasets.
+  `running` means an active worker; a capped run retaining `nextCursor` is `partial`.
 
 All Phase 1 tables use bigint identity primary keys, indexed foreign keys, typed numeric/time
 columns, RLS without browser policies, and revoked `anon`/`authenticated` privileges.

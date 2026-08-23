@@ -1,7 +1,7 @@
-import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
+from re import fullmatch
 from zoneinfo import ZoneInfo
 
 from app.providers.transport import QuotaAwareTransport
@@ -16,55 +16,46 @@ from app.schemas.warehouse import (
 )
 
 JAKARTA = ZoneInfo("Asia/Jakarta")
+ZAPI_PLUANG_NAMESPACE = "finance:pluang"
 PluangPayloadSink = Callable[[RawPayloadRecord], Awaitable[None]]
 
 
 class PluangProvider:
+    """Normalize Pluang-source data delivered through the documented Zapi gateway."""
+
     name = "pluang"
+    gateway = "zapi"
 
     def __init__(
         self,
+        api_key: str,
         base_url: str,
         transport: QuotaAwareTransport,
         raw_payload_sink: PluangPayloadSink | None = None,
     ) -> None:
+        if not api_key:
+            raise ValueError("ZAPI_API_KEY is required for finance:pluang")
+        self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._transport = transport
         self._raw_payload_sink = raw_payload_sink
 
     async def resolve_instrument(self, ticker: str) -> InstrumentMappingRecord:
-        code = ticker.strip().upper()
-        payload = await self._get(
-            "instrument-mapping",
-            "description-by-code",
-            {"stockCode": code},
-        )
-        raw = RawPayloadRecord(
-            provider=self.name,
-            dataset="instrument-mapping",
-            instrument_key=code,
-            payload=payload,
-            normalization_status="staged",
-        )
+        code = _ticker(ticker)
+        payload = await self._get("resolve", {"code": code})
+        raw = self._raw_record("resolve", code, payload)
         try:
-            body = _unwrap(payload, dataset="instrument-mapping")
-            instrument_id = body.get("id")
-            if instrument_id is None:
-                result = InstrumentMappingRecord(
-                    ticker=code,
-                    provider_instrument_id=None,
-                    provider_ticker=code,
-                    mapping_status="unsupported",
-                )
-            else:
-                if not isinstance(instrument_id, int) or instrument_id <= 0:
-                    raise ValueError("Pluang instrument id must be a positive integer")
-                result = InstrumentMappingRecord(
-                    ticker=code,
-                    provider_instrument_id=str(instrument_id),
-                    provider_ticker=code,
-                    mapping_status="mapped",
-                )
+            body = _unwrap_zapi_pluang(payload, dataset="resolve", ticker=code)
+            instrument_id = body.get("stockId")
+            if not isinstance(instrument_id, int) or instrument_id <= 0:
+                raise ValueError("finance:pluang stockId must be a positive integer")
+            result = InstrumentMappingRecord(
+                ticker=code,
+                provider_instrument_id=str(instrument_id),
+                provider_ticker=code,
+                mapping_status="mapped",
+                source="zapi-finance:pluang-resolve",
+            )
         except ValueError as error:
             await self._stage(raw, "rejected", str(error))
             raise
@@ -72,29 +63,23 @@ class PluangProvider:
         return result
 
     async def get_broker_summary(
-        self, ticker: str, instrument_id: str, trade_date: date
+        self, ticker: str, trade_date: date
     ) -> tuple[list[BrokerFlowRecord], dict[str, object]]:
+        code = _ticker(ticker)
         payload = await self._get(
             "broker-summary",
-            "broker/summary",
             {
-                "stockId": instrument_id,
+                "code": code,
                 "startDate": trade_date.isoformat(),
                 "endDate": trade_date.isoformat(),
                 "net": "true",
             },
         )
-        raw = RawPayloadRecord(
-            provider=self.name,
-            dataset="broker-summary",
-            instrument_key=instrument_id,
-            date_from=trade_date,
-            date_to=trade_date,
-            payload=payload,
-            normalization_status="staged",
+        raw = self._raw_record(
+            "broker-summary", code, payload, date_from=trade_date, date_to=trade_date
         )
         try:
-            result = map_pluang_broker_summary(payload, ticker)
+            result = map_pluang_broker_summary(payload, code)
         except ValueError as error:
             await self._stage(raw, "rejected", str(error))
             raise
@@ -104,27 +89,25 @@ class PluangProvider:
     async def get_running_trades(
         self,
         ticker: str,
-        instrument_id: str,
         trade_date: date,
         *,
         cursor: str | None = None,
     ) -> tuple[RunningTradesPage, dict[str, object]]:
-        params = {"stockId": instrument_id}
+        code = _ticker(ticker)
+        params = {"code": code}
         if cursor:
-            params["next"] = cursor
-        payload = await self._get("running-trades", "market-feed/running-trades", params)
-        raw = RawPayloadRecord(
-            provider=self.name,
-            dataset="running-trades",
-            instrument_key=instrument_id,
+            params["cursor"] = cursor
+        payload = await self._get("running-trades", params)
+        raw = self._raw_record(
+            "running-trades",
+            code,
+            payload,
             date_from=trade_date,
             date_to=trade_date,
             cursor_value=cursor,
-            payload=payload,
-            normalization_status="staged",
         )
         try:
-            result = map_pluang_running_trades(payload, ticker, trade_date)
+            result = map_pluang_running_trades(payload, code, trade_date)
         except ValueError as error:
             await self._stage(raw, "rejected", str(error))
             raise
@@ -132,31 +115,52 @@ class PluangProvider:
         return result, payload
 
     async def get_orderbook(
-        self, ticker: str, instrument_id: str
+        self, ticker: str
     ) -> tuple[OrderbookSnapshotRecord, dict[str, object]]:
-        payload = await self._get("orderbook", "market-feed/orderbook", {"stockId": instrument_id})
-        raw = RawPayloadRecord(
-            provider=self.name,
-            dataset="orderbook",
-            instrument_key=instrument_id,
-            payload=payload,
-            normalization_status="staged",
-        )
+        code = _ticker(ticker)
+        payload = await self._get("orderbook", {"code": code})
+        raw = self._raw_record("orderbook", code, payload)
         try:
-            result = map_pluang_orderbook(payload, ticker)
+            result = map_pluang_orderbook(payload, code)
         except ValueError as error:
             await self._stage(raw, "rejected", str(error))
             raise
         await self._stage(raw, "normalized", None)
         return result, payload
 
-    async def _get(self, dataset: str, endpoint: str, params: dict[str, str]) -> dict[str, object]:
+    async def _get(
+        self, endpoint: str, params: dict[str, str]
+    ) -> dict[str, object]:
+        endpoint_name = f"{ZAPI_PLUANG_NAMESPACE}/{endpoint}"
         return await self._transport.get_json(
-            dataset=dataset,
-            endpoint_name=endpoint,
+            dataset=endpoint_name,
+            endpoint_name=endpoint_name,
             url=f"{self._base_url}/{endpoint}",
             params=params,
-            headers=_browser_headers(),
+            headers={"x-api-key": self._api_key},
+        )
+
+    def _raw_record(
+        self,
+        endpoint: str,
+        ticker: str,
+        payload: dict[str, object],
+        *,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        cursor_value: str | None = None,
+    ) -> RawPayloadRecord:
+        return RawPayloadRecord(
+            provider=self.name,
+            gateway=self.gateway,
+            source_provider=self.name,
+            dataset=f"{ZAPI_PLUANG_NAMESPACE}/{endpoint}",
+            instrument_key=ticker,
+            date_from=date_from,
+            date_to=date_to,
+            cursor_value=cursor_value,
+            payload=payload,
+            normalization_status="staged",
         )
 
     async def _stage(
@@ -173,50 +177,70 @@ class PluangProvider:
             )
 
 
-def map_pluang_broker_summary(payload: dict[str, object], ticker: str) -> list[BrokerFlowRecord]:
-    body = _unwrap(payload, dataset="broker-summary")
-    rows = body.get("brokerSummary")
-    if not isinstance(rows, list):
-        raise ValueError("Pluang broker summary rows must be a list")
+def map_pluang_broker_summary(
+    payload: dict[str, object], ticker: str
+) -> list[BrokerFlowRecord]:
+    code = _ticker(ticker)
+    body = _unwrap_zapi_pluang(payload, dataset="broker-summary", ticker=code)
+    buyers = body.get("buyers")
+    sellers = body.get("sellers")
+    if not isinstance(buyers, list) or not isinstance(sellers, list):
+        raise ValueError("finance:pluang broker buyers and sellers must be lists")
+    capped = body.get("capped")
+    if not isinstance(capped, bool):
+        raise ValueError("finance:pluang broker capped flag must be boolean")
+    count = body.get("count")
+    if not isinstance(count, int) or count < 0:
+        raise ValueError("finance:pluang broker count must be non-negative")
     date_from = date.fromisoformat(str(body.get("startDate")))
     date_to = date.fromisoformat(str(body.get("endDate")))
+    source_scope = "top_n" if capped else "complete"
+    source_top_n = count if capped else None
     output: list[BrokerFlowRecord] = []
-    for rank, row in enumerate(rows, start=1):
-        if not isinstance(row, dict):
-            raise ValueError("Pluang broker summary row must be an object")
-        output.extend(
-            (
-                _broker_side(row, ticker, date_from, date_to, rank, "BUY"),
-                _broker_side(row, ticker, date_from, date_to, rank, "SELL"),
+    for side, rows in (("BUY", buyers), ("SELL", sellers)):
+        for rank, row in enumerate(rows, start=1):
+            if not isinstance(row, dict):
+                raise ValueError("finance:pluang broker row must be an object")
+            output.append(
+                _broker_side(
+                    row,
+                    code,
+                    date_from,
+                    date_to,
+                    rank,
+                    side,
+                    source_scope,
+                    source_top_n,
+                )
             )
-        )
     return output
 
 
 def map_pluang_running_trades(
     payload: dict[str, object], ticker: str, trade_date: date
 ) -> RunningTradesPage:
-    body = _unwrap(payload, dataset="running-trades")
-    rows = body.get("rt")
+    code = _ticker(ticker)
+    body = _unwrap_zapi_pluang(payload, dataset="running-trades", ticker=code)
+    rows = body.get("items")
     if not isinstance(rows, list):
-        raise ValueError("Pluang running trades rows must be a list")
+        raise ValueError("finance:pluang running-trades items must be a list")
     records: list[TradePrintRecord] = []
     seen: set[str] = set()
     for row in rows:
         if not isinstance(row, dict):
-            raise ValueError("Pluang running trade row must be an object")
-        sequence = str(row.get("seq", ""))
+            raise ValueError("finance:pluang running-trades item must be an object")
+        sequence = str(row.get("sequence", ""))
         if not sequence or sequence in seen:
-            raise ValueError("Pluang running trades contains duplicate or missing sequence")
+            raise ValueError("finance:pluang running-trades has duplicate or missing sequence")
         seen.add(sequence)
         action = str(row.get("action", "")).upper()
         if action not in {"BUY", "SELL"}:
-            action = "UNKNOWN"
+            raise ValueError("finance:pluang running-trades action must be BUY or SELL")
         execution_time = time.fromisoformat(str(row["time"]))
-        lots = int(row["lot"])
+        lots = int(row["lots"])
         records.append(
             TradePrintRecord(
-                ticker=ticker,
+                ticker=code,
                 provider_sequence=sequence,
                 trade_date=trade_date,
                 executed_at=datetime.combine(trade_date, execution_time, tzinfo=JAKARTA),
@@ -226,28 +250,31 @@ def map_pluang_running_trades(
                 aggressor_action=action,
             )
         )
-    next_cursor = body.get("next")
+    next_cursor = body.get("nextCursor")
     if next_cursor is not None and not isinstance(next_cursor, str):
-        raise ValueError("Pluang running trades next cursor must be a string")
+        raise ValueError("finance:pluang nextCursor must be a string")
     return RunningTradesPage(records=records, next_cursor=next_cursor)
 
 
-def map_pluang_orderbook(payload: dict[str, object], ticker: str) -> OrderbookSnapshotRecord:
-    body = _unwrap(payload, dataset="orderbook")
+def map_pluang_orderbook(
+    payload: dict[str, object], ticker: str
+) -> OrderbookSnapshotRecord:
+    code = _ticker(ticker)
+    body = _unwrap_zapi_pluang(payload, dataset="orderbook", ticker=code)
     levels: list[OrderbookLevelRecord] = []
     for key, side in (("bids", "BID"), ("asks", "ASK")):
         rows = body.get(key)
         if not isinstance(rows, list):
-            raise ValueError(f"Pluang orderbook {key} must be a list")
+            raise ValueError(f"finance:pluang orderbook {key} must be a list")
         for rank, row in enumerate(rows, start=1):
             if not isinstance(row, dict):
-                raise ValueError("Pluang orderbook level must be an object")
+                raise ValueError("finance:pluang orderbook level must be an object")
             levels.append(
                 OrderbookLevelRecord(
                     side=side,
                     level_rank=rank,
-                    price=Decimal(str(row["p"])),
-                    lots=int(str(row["l"])),
+                    price=Decimal(str(row["price"])),
+                    lots=int(str(row["lots"])),
                 )
             )
     bids = [level.price for level in levels if level.side == "BID"]
@@ -257,9 +284,9 @@ def map_pluang_orderbook(payload: dict[str, object], ticker: str) -> OrderbookSn
     spread = best_ask - best_bid if best_bid is not None and best_ask is not None else None
     timestamp = payload.get("timestamp")
     if not isinstance(timestamp, str):
-        raise ValueError("Pluang orderbook timestamp is missing")
+        raise ValueError("finance:pluang gateway timestamp is missing")
     return OrderbookSnapshotRecord(
-        ticker=ticker,
+        ticker=code,
         observed_at=datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone(UTC),
         best_bid=best_bid,
         best_ask=best_ask,
@@ -268,12 +295,16 @@ def map_pluang_orderbook(payload: dict[str, object], ticker: str) -> OrderbookSn
     )
 
 
-def _unwrap(payload: dict[str, object], *, dataset: str) -> dict[str, object]:
-    if payload.get("statusCode") != 200:
-        raise ValueError(f"Pluang {dataset} response statusCode must be 200")
+def _unwrap_zapi_pluang(
+    payload: dict[str, object], *, dataset: str, ticker: str
+) -> dict[str, object]:
     body = payload.get("data")
     if not isinstance(body, dict):
-        raise ValueError(f"Pluang {dataset} data must be an object")
+        raise ValueError(f"finance:pluang {dataset} data must be an object")
+    if body.get("source") != "pluang":
+        raise ValueError(f"finance:pluang {dataset} source must be pluang")
+    if body.get("code") != ticker:
+        raise ValueError(f"finance:pluang {dataset} code mismatch")
     return body
 
 
@@ -284,38 +315,31 @@ def _broker_side(
     date_to: date,
     rank: int,
     side: str,
+    source_scope: str,
+    source_top_n: int | None,
 ) -> BrokerFlowRecord:
-    prefix = "buy" if side == "BUY" else "sell"
-    code_field = "buyerCode" if side == "BUY" else "sellerCode"
-    broker = row.get(code_field)
-    if not isinstance(broker, dict) or not broker.get("value"):
-        raise ValueError("Pluang broker summary code is missing")
-    lots = int(str(row[f"{prefix}Lot"]))
+    broker = row.get("broker")
+    if not isinstance(broker, str) or not broker.strip():
+        raise ValueError("finance:pluang broker code is missing")
+    lots = int(str(row["lots"]))
     return BrokerFlowRecord(
         ticker=ticker,
         trade_date_from=date_from,
         trade_date_to=date_to,
-        broker_code=str(broker["value"]),
+        broker_code=broker,
         side=side,
         rank=rank,
         lots=lots,
         shares=lots * 100,
-        value_idr=Decimal(str(row[f"{prefix}Value"])),
-        average_price=Decimal(str(row[f"{prefix}Average"])),
+        value_idr=Decimal(str(row["value"])),
+        average_price=Decimal(str(row["averagePrice"])),
+        source_scope=source_scope,
+        source_top_n=source_top_n,
     )
 
 
-def _browser_headers() -> dict[str, str]:
-    return {
-        "accept": "application/json, text/plain, */*",
-        "referer": "https://pluang.com/",
-        "x-language-code": "en",
-        "x-request-id": str(uuid.uuid4()),
-        "sec-ch-ua-platform": '"Windows"',
-        "sec-ch-ua": '"Not=A?Brand";v="99", "Chromium";v="151"',
-        "sec-ch-ua-mobile": "?0",
-        "user-agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0 Safari/537.36"
-        ),
-    }
+def _ticker(value: str) -> str:
+    code = value.strip().upper()
+    if not fullmatch(r"[A-Z0-9]{1,12}", code):
+        raise ValueError("invalid IDX ticker")
+    return code

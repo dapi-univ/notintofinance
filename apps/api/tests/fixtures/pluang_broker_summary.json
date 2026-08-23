@@ -1,21 +1,20 @@
 {
   "data": {
-    "brokerSummary": [
-      {
-        "buyAverage": 6439,
-        "buyLot": 150759,
-        "buyValue": 97081440000,
-        "buyerCode": {"value": "AK"},
-        "sellAverage": 6443,
-        "sellLot": 182436,
-        "sellValue": 117543737500,
-        "sellerCode": {"value": "RX"}
-      }
+    "buyers": [
+      {"averagePrice": 6439, "broker": "AK", "lots": 150759, "value": 97081440000}
     ],
+    "capped": true,
+    "code": "BBCA",
+    "count": 10,
     "endDate": "2026-08-21",
     "net": true,
-    "startDate": "2026-08-21"
+    "sellers": [
+      {"averagePrice": 6443, "broker": "RX", "lots": 182436, "value": 117543737500}
+    ],
+    "source": "pluang",
+    "startDate": "2026-08-21",
+    "stockId": 10020
   },
-  "statusCode": 200,
-  "timestamp": "2026-08-23T07:01:33Z"
+  "project": "finance:pluang",
+  "timestamp": "2026-08-23T08:21:00Z"
 }

@@ -1,11 +1,16 @@
 {
   "data": {
-    "next": "MjI2OTQ=",
-    "rt": [
-      {"action": "SELL", "lot": 29, "price": 6425, "seq": 23034, "time": "15:49:58"},
-      {"action": "BUY", "lot": 1, "price": 6450, "seq": 23033, "time": "15:49:58"}
-    ]
+    "code": "BBCA",
+    "count": 2,
+    "fetched": 2,
+    "items": [
+      {"action": "SELL", "lots": 29, "price": 6425, "sequence": 23034, "time": "15:49:58"},
+      {"action": "BUY", "lots": 1, "price": 6450, "sequence": 23033, "time": "15:49:58"}
+    ],
+    "nextCursor": "MjI2OTQ=",
+    "source": "pluang",
+    "stockId": 10020
   },
-  "statusCode": 200,
-  "timestamp": "2026-08-23T07:01:33Z"
+  "project": "finance:pluang",
+  "timestamp": "2026-08-23T08:21:00Z"
 }

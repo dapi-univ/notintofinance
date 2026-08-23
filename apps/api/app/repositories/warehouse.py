@@ -158,6 +158,8 @@ class PostgresWarehouseRepository:
         async with self._database.session() as session, session.begin():
             statement = pg_insert(RawProviderPayload).values(
                 provider=record.provider,
+                gateway=record.gateway,
+                source_provider=record.source_provider,
                 dataset=record.dataset,
                 instrument_key=record.instrument_key,
                 date_from=record.date_from,
@@ -388,6 +390,7 @@ class PostgresWarehouseRepository:
             if not row:
                 return None
             return IngestionCursorState(
+                instrument_key=row.instrument_key,
                 session_date=row.session_date,
                 cursor_value=row.cursor_value,
                 high_water_mark=row.high_water_mark,
@@ -419,6 +422,25 @@ class PostgresWarehouseRepository:
                     retryable=retryable,
                     is_terminal=terminal,
                     attempt_count=1,
+                )
+            )
+
+    async def has_terminal_quality_block(
+        self, *, ticker: str, provider: str, dataset: str
+    ) -> bool:
+        async with self._database.session() as session:
+            return bool(
+                await session.scalar(
+                    select(DataQualityEvent.id)
+                    .join(Stock, Stock.id == DataQualityEvent.stock_id)
+                    .where(
+                        Stock.ticker == ticker.upper(),
+                        DataQualityEvent.provider == provider,
+                        DataQualityEvent.dataset == dataset,
+                        DataQualityEvent.is_terminal,
+                        DataQualityEvent.resolved_at.is_(None),
+                    )
+                    .limit(1)
                 )
             )
 
@@ -459,7 +481,13 @@ class PostgresWarehouseRepository:
             )
 
     async def trades(
-        self, ticker: str, date_from: date, date_to: date, *, limit: int, cursor: int | None
+        self,
+        ticker: str,
+        date_from: date,
+        date_to: date,
+        *,
+        limit: int,
+        cursor: tuple[datetime, int] | None,
     ) -> list[TradePrint]:
         async with self._database.session() as session:
             statement = (
@@ -473,8 +501,31 @@ class PostgresWarehouseRepository:
                 .limit(limit)
             )
             if cursor is not None:
-                statement = statement.where(TradePrint.id < cursor)
+                statement = statement.where(
+                    tuple_(TradePrint.executed_at, TradePrint.id) < cursor
+                )
             return list((await session.scalars(statement)).all())
+
+    async def trades_by_sequences(
+        self, ticker: str, trade_date: date, sequences: list[str]
+    ) -> list[TradePrint]:
+        if not sequences:
+            return []
+        async with self._database.session() as session:
+            return list(
+                (
+                    await session.scalars(
+                        select(TradePrint)
+                        .join(Stock, Stock.id == TradePrint.stock_id)
+                        .where(
+                            Stock.ticker == ticker.upper(),
+                            TradePrint.provider == "pluang",
+                            TradePrint.trade_date == trade_date,
+                            TradePrint.provider_sequence.in_(sequences),
+                        )
+                    )
+                ).all()
+            )
 
     async def latest_orderbook(
         self, ticker: str

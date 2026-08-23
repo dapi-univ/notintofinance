@@ -16,6 +16,7 @@ from app.schemas.api import (
     TradesResponse,
 )
 from app.services.market import HistoryTimeframe, MarketService
+from app.services.trade_cursor import InvalidTradeCursor
 from app.services.warehouse_read import WarehouseReadService
 
 router = APIRouter()
@@ -103,13 +104,16 @@ async def trades(
     date_from: Annotated[date, Query(alias="from")],
     date_to: Annotated[date, Query(alias="to")],
     limit: Annotated[int, Query(ge=1, le=1000)] = 200,
-    cursor: Annotated[int | None, Query(gt=0)] = None,
+    cursor: Annotated[str | None, Query(max_length=256)] = None,
 ) -> TradesResponse:
     if date_to < date_from or (date_to - date_from).days > 7:
         raise HTTPException(status_code=422, detail="Trade range must be 0 to 7 days")
-    return await _warehouse(request).trades(
-        ticker.upper(), date_from, date_to, limit=limit, cursor=cursor
-    )
+    try:
+        return await _warehouse(request).trades(
+            ticker.upper(), date_from, date_to, limit=limit, cursor=cursor
+        )
+    except InvalidTradeCursor as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @router.get("/stocks/{ticker}/orderbook/latest", response_model=OrderbookSnapshotResponse)

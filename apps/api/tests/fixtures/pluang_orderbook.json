@@ -1,11 +1,17 @@
 {
   "data": {
+    "askCount": 1,
     "askPercent": 87,
-    "asks": [{"l": 75223, "p": 6450}],
+    "asks": [{"lots": 75223, "price": 6450}],
+    "bestAsk": 6450,
+    "bestBid": 6425,
+    "bidCount": 1,
     "bidPercent": 13,
-    "bids": [{"l": 10955, "p": 6425}],
-    "subscription": "sanitized-subscription"
+    "bids": [{"lots": 10955, "price": 6425}],
+    "code": "BBCA",
+    "source": "pluang",
+    "stockId": 10020
   },
-  "statusCode": 200,
-  "timestamp": "2026-08-23T07:01:33Z"
+  "project": "finance:pluang",
+  "timestamp": "2026-08-23T08:21:00Z"
 }

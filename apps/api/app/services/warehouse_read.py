@@ -12,6 +12,7 @@ from app.schemas.api import (
     TradePrintResponse,
     TradesResponse,
 )
+from app.services.trade_cursor import decode_trade_cursor, encode_trade_cursor
 
 
 class WarehouseReadService:
@@ -53,10 +54,11 @@ class WarehouseReadService:
         date_to: date,
         *,
         limit: int,
-        cursor: int | None,
+        cursor: str | None,
     ) -> TradesResponse:
+        decoded_cursor = decode_trade_cursor(cursor) if cursor else None
         rows = await self._repository.trades(
-            ticker, date_from, date_to, limit=limit + 1, cursor=cursor
+            ticker, date_from, date_to, limit=limit + 1, cursor=decoded_cursor
         )
         has_more = len(rows) > limit
         page = rows[:limit]
@@ -76,7 +78,11 @@ class WarehouseReadService:
                 )
                 for row in page
             ],
-            next_cursor=page[-1].id if has_more and page else None,
+            next_cursor=(
+                encode_trade_cursor(page[-1].executed_at, page[-1].id)
+                if has_more and page
+                else None
+            ),
         )
 
     async def latest_orderbook(self, ticker: str) -> OrderbookSnapshotResponse | None:

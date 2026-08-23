@@ -111,7 +111,7 @@ class TradePrintResponse(BaseModel):
 class TradesResponse(BaseModel):
     ticker: str
     rows: list[TradePrintResponse]
-    next_cursor: int | None
+    next_cursor: str | None
 
 
 class OrderbookLevelResponse(BaseModel):

@@ -20,22 +20,28 @@ async def _run(args: argparse.Namespace) -> None:
         database, raw_retention_days=settings.raw_payload_retention_days
     )
     market = PostgresMarketRepository(database)
+    latest_quota = await warehouse.latest_quota("zapi")
+    remaining_month = latest_quota.get("remaining_month") if latest_quota else None
     budget = RequestBudget(
         daily_soft_limit=args.daily_budget or settings.provider_daily_soft_budget,
         monthly_reserve=settings.provider_monthly_reserve,
         run_limit=args.request_cap or settings.provider_canary_request_cap,
-        requests_today=await warehouse.requests_today("pluang"),
+        requests_today=await warehouse.requests_today("zapi"),
+        remaining_month=remaining_month if isinstance(remaining_month, int) else None,
     )
     transport = QuotaAwareTransport(
-        provider="pluang",
+        provider="zapi",
         concurrency=args.concurrency,
         timeout_seconds=settings.provider_timeout_seconds,
         budget=budget,
         event_sink=warehouse.record_request,
-        expect_quota_headers=False,
+        expect_quota_headers=True,
     )
     provider = PluangProvider(
-        settings.pluang_base_url, transport, raw_payload_sink=warehouse.stage_raw_payload
+        settings.zapi_api_key or "",
+        settings.zapi_pluang_base_url,
+        transport,
+        raw_payload_sink=warehouse.stage_raw_payload,
     )
     service = PluangIngestionService(provider, warehouse)
     try:
@@ -71,7 +77,10 @@ async def _run(args: argparse.Namespace) -> None:
         if session_date is None:
             raise RuntimeError("no confirmed market session is stored")
         canary_results = await service.collect_canary(
-            tickers, trade_date=session_date, max_pages=args.max_pages
+            tickers,
+            trade_date=session_date,
+            max_pages=args.max_pages,
+            compare_existing=args.compare_existing,
         )
         for item in canary_results:
             detail = f" error={item.error}" if item.error else ""
@@ -97,6 +106,7 @@ def main() -> None:
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--daily-budget", type=int)
     parser.add_argument("--request-cap", type=int)
+    parser.add_argument("--compare-existing", action="store_true")
     args = parser.parse_args()
     if args.operation == "map" and not args.tickers and not args.all_active:
         parser.error("map requires tickers or --all-active")

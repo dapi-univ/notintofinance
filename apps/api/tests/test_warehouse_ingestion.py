@@ -16,6 +16,7 @@ from app.services.warehouse import PluangIngestionService
 class CursorRepository:
     def __init__(self) -> None:
         self.cursor_updates: list[dict[str, object]] = []
+        self.blocked_datasets: set[str] = set()
 
     async def mapping(self, ticker: str) -> InstrumentMappingRecord:
         return InstrumentMappingRecord(
@@ -27,11 +28,15 @@ class CursorRepository:
 
     async def ingestion_cursor(self, **_: object) -> IngestionCursorState:
         return IngestionCursorState(
+            instrument_key="10020",
             session_date=date(2026, 8, 21),
             cursor_value="resume-cursor",
             high_water_mark="23034",
             status="running",
         )
+
+    async def has_terminal_quality_block(self, **values: object) -> bool:
+        return values["dataset"] in self.blocked_datasets
 
     @asynccontextmanager
     async def advisory_lock(self, _: str) -> AsyncIterator[None]:
@@ -97,4 +102,20 @@ async def test_running_trade_canary_resumes_and_preserves_capped_cursor() -> Non
     assert result[0].status == "partial"
     assert result[0].trade_pages == 1
     assert repository.cursor_updates[-1]["cursor_value"] == "next-cursor"
-    assert repository.cursor_updates[-1]["status"] == "running"
+    assert repository.cursor_updates[-1]["status"] == "partial"
+
+
+async def test_terminal_quality_event_blocks_only_affected_dataset() -> None:
+    repository = CursorRepository()
+    repository.blocked_datasets.add("finance:pluang/running-trades")
+    service = PluangIngestionService(CursorProvider(), repository)  # type: ignore[arg-type]
+
+    result = await service.collect_canary(
+        ["BBCA"], trade_date=date(2026, 8, 21), max_pages=1
+    )
+
+    assert result[0].status == "blocked"
+    assert result[0].error == "running-trades-blocked"
+    assert result[0].trade_rows == 0
+    assert result[0].trade_pages == 0
+    assert repository.cursor_updates == []
