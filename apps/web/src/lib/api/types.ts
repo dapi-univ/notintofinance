@@ -64,3 +64,59 @@ export type DataStatus = {
     rows_received: number;
   } | null;
 };
+
+export type BrokerAccumulationPoint = {
+  trade_date: string;
+  buy_observed: boolean;
+  sell_observed: boolean;
+  observed_top_n_buy_value: Numberish;
+  observed_top_n_sell_value: Numberish;
+  observed_top_n_net_value: Numberish;
+  cumulative_observed_top_n_net_value: Numberish;
+  observed_top_n_buy_lots: number;
+  observed_top_n_sell_lots: number;
+  observed_top_n_net_lots: number;
+  cumulative_observed_top_n_net_lots: number;
+  observed_top_n_buy_shares: number;
+  observed_top_n_sell_shares: number;
+  observed_top_n_net_shares: number;
+  cumulative_observed_top_n_net_shares: number;
+};
+
+export type BrokerAccumulationBroker = {
+  broker_code: string;
+  broker_name: string | null;
+  classification: string | null;
+  observed_top_n_buy_value: Numberish;
+  observed_top_n_sell_value: Numberish;
+  observed_top_n_net_value: Numberish;
+  observed_top_n_buy_lots: number;
+  observed_top_n_sell_lots: number;
+  observed_top_n_net_lots: number;
+  observed_top_n_buy_shares: number;
+  observed_top_n_sell_shares: number;
+  observed_top_n_net_shares: number;
+  buy_appearances: number;
+  sell_appearances: number;
+  latest_buy_rank: number | null;
+  latest_sell_rank: number | null;
+  daily: BrokerAccumulationPoint[];
+};
+
+export type BrokerAccumulationResponse = {
+  ticker: string;
+  from: string;
+  to: string;
+  source_scope: "top_n";
+  source_top_n: number;
+  coverage_note: string;
+  gateway: string;
+  source_provider: string;
+  coverage: {
+    expected_sessions: string[];
+    covered_sessions: string[];
+    missing_sessions: string[];
+    state: "complete" | "partial" | "unavailable";
+  };
+  brokers: BrokerAccumulationBroker[];
+};

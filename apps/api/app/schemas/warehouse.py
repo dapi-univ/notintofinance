@@ -31,6 +31,15 @@ class BrokerFlowRecord(BaseModel):
     source_top_n: int | None = Field(default=10, gt=0)
 
 
+class BrokerDirectoryRecord(BaseModel):
+    broker_code: str = Field(min_length=1)
+    broker_name: str = Field(min_length=1)
+    classification: str | None = None
+    gateway: str = "zapi"
+    source_provider: str = "pluang"
+    source_observed_at: datetime
+
+
 class TradePrintRecord(BaseModel):
     ticker: str
     provider_sequence: str = Field(min_length=1)
@@ -41,6 +50,9 @@ class TradePrintRecord(BaseModel):
     shares: int = Field(ge=0)
     aggressor_action: str | None
     provider: str = "pluang"
+    gateway_observed_at: datetime | None = None
+    session_binding_method: str | None = None
+    provider_session_asserted: bool = False
 
 
 class OrderbookLevelRecord(BaseModel):
@@ -84,6 +96,19 @@ class TradebookAggregateRecord(BaseModel):
     total_lots: int | None = Field(default=None, ge=0)
     provider: str = "pluang"
     source_scope: str = "provider_aggregate"
+
+
+class TradebookSessionRecord(BaseModel):
+    ticker: str = Field(pattern=r"^[A-Z0-9]{1,12}$")
+    trade_date: date
+    price_available: bool
+    time_available: bool
+    volume_available: bool
+    processed_successfully: bool
+    gateway_observed_at: datetime
+    session_binding_method: str = "confirmed_latest_eod"
+    provider_session_asserted: bool = False
+    provider: str = "pluang"
 
 
 class IngestionCursorState(BaseModel):

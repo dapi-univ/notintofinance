@@ -80,6 +80,12 @@ async def _run(args: argparse.Namespace) -> None:
             )
             return
 
+        if args.operation == "brokers":
+            records, _ = await provider.get_brokers()
+            retained = await warehouse.upsert_broker_directory(records)
+            print(f"broker_directory_received={len(records)} retained={retained}")
+            return
+
         if args.operation == "dry-run":
             candidates = prioritize_market_candidates(
                 await warehouse.collection_candidates(mapped_only=True),
@@ -122,7 +128,7 @@ async def _run(args: argparse.Namespace) -> None:
         session_date = session_date or await market.latest_trade_date()
         if session_date is None:
             raise RuntimeError("no confirmed market session is stored")
-        if args.operation in {"broker", "tradebook", "running"}:
+        if args.operation in {"broker", "broker-backfill", "tradebook", "running"}:
             candidates = prioritize_market_candidates(
                 await warehouse.collection_candidates(mapped_only=True),
                 strategic_watchlist=args.strategic_tickers,
@@ -139,7 +145,26 @@ async def _run(args: argparse.Namespace) -> None:
                     f"selected={len(tickers)} write=false tickers={','.join(tickers)}"
                 )
                 return
-            if args.operation == "broker":
+            if args.operation == "broker-backfill":
+                if len(tickers) > 10 or args.sessions > 20:
+                    raise RuntimeError("broker backfill is bounded to 10 tickers and 20 sessions")
+                results = []
+                for ticker in tickers:
+                    sessions = await warehouse.latest_eod_sessions(
+                        ticker, limit=args.sessions
+                    )
+                    if not sessions:
+                        print(f"{ticker}: status=unsupported reason=no-eod-sessions")
+                        continue
+                    for confirmed_session in sessions:
+                        results.extend(
+                            await collection.collect_broker_daily(
+                                [ticker],
+                                trade_date=confirmed_session,
+                                concurrency=1,
+                            )
+                        )
+            elif args.operation == "broker":
                 results = await collection.collect_broker_daily(
                     tickers, trade_date=session_date, concurrency=args.concurrency
                 )
@@ -173,6 +198,13 @@ async def _run(args: argparse.Namespace) -> None:
                     f"retained={collection_item.rows_retained} "
                     f"cursor={collection_item.cursor_remaining}{detail}"
                 )
+            failures = [
+                item for item in results if item.status in {"failed", "blocked"}
+            ]
+            if failures:
+                raise RuntimeError(
+                    f"collection completed with {len(failures)} failed or blocked sessions"
+                )
             return
 
         canary_results = await service.collect_canary(
@@ -197,7 +229,17 @@ async def _run(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run bounded Pluang warehouse collectors")
     parser.add_argument(
-        "operation", choices=["map", "canary", "broker", "tradebook", "running", "dry-run"]
+        "operation",
+        choices=[
+            "map",
+            "canary",
+            "brokers",
+            "broker",
+            "broker-backfill",
+            "tradebook",
+            "running",
+            "dry-run",
+        ],
     )
     parser.add_argument("tickers", nargs="*")
     parser.add_argument("--all-active", action="store_true")
@@ -205,6 +247,7 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-symbols", type=int)
     parser.add_argument("--max-pages", type=int, default=3)
+    parser.add_argument("--sessions", type=int, default=20)
     parser.add_argument("--trade-date")
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--daily-budget", type=int)
@@ -222,7 +265,7 @@ def main() -> None:
         parser.error("canary accepts at most three cursor pages")
     if args.operation == "canary" and (args.request_cap or 30) > 30:
         parser.error("canary request cap cannot exceed 30")
-    if args.operation in {"broker", "tradebook", "running"} and not (
+    if args.operation in {"broker", "broker-backfill", "tradebook", "running"} and not (
         args.tickers or args.all_active
     ):
         parser.error(f"{args.operation} requires tickers or --all-active")

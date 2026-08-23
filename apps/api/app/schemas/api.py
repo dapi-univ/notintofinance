@@ -96,6 +96,64 @@ class BrokerFlowResponse(BaseModel):
     rows: list[BrokerFlowItemResponse]
 
 
+class BrokerAccumulationCoverageResponse(BaseModel):
+    expected_sessions: list[date]
+    covered_sessions: list[date]
+    missing_sessions: list[date]
+    state: str
+
+
+class BrokerAccumulationPointResponse(BaseModel):
+    trade_date: date
+    buy_observed: bool
+    sell_observed: bool
+    observed_top_n_buy_value: Decimal
+    observed_top_n_sell_value: Decimal
+    observed_top_n_net_value: Decimal
+    cumulative_observed_top_n_net_value: Decimal
+    observed_top_n_buy_lots: int
+    observed_top_n_sell_lots: int
+    observed_top_n_net_lots: int
+    cumulative_observed_top_n_net_lots: int
+    observed_top_n_buy_shares: int
+    observed_top_n_sell_shares: int
+    observed_top_n_net_shares: int
+    cumulative_observed_top_n_net_shares: int
+
+
+class BrokerAccumulationBrokerResponse(BaseModel):
+    broker_code: str
+    broker_name: str | None
+    classification: str | None
+    observed_top_n_buy_value: Decimal
+    observed_top_n_sell_value: Decimal
+    observed_top_n_net_value: Decimal
+    observed_top_n_buy_lots: int
+    observed_top_n_sell_lots: int
+    observed_top_n_net_lots: int
+    observed_top_n_buy_shares: int
+    observed_top_n_sell_shares: int
+    observed_top_n_net_shares: int
+    buy_appearances: int
+    sell_appearances: int
+    latest_buy_rank: int | None
+    latest_sell_rank: int | None
+    daily: list[BrokerAccumulationPointResponse]
+
+
+class BrokerAccumulationResponse(BaseModel):
+    ticker: str
+    date_from: date = Field(serialization_alias="from")
+    date_to: date = Field(serialization_alias="to")
+    source_scope: str = "top_n"
+    source_top_n: int = 10
+    coverage_note: str = "TOP-10 OBSERVED · NOT FULL MARKET"
+    gateway: str = "zapi"
+    source_provider: str = "pluang"
+    coverage: BrokerAccumulationCoverageResponse
+    brokers: list[BrokerAccumulationBrokerResponse]
+
+
 class TradePrintResponse(BaseModel):
     id: int
     provider_sequence: str

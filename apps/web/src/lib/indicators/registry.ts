@@ -17,8 +17,9 @@ import { formatCompact, toNumber } from "@/lib/format/market";
 export type IndicatorId =
   | "volume"
   | "frequency-analyzer"
-  | "foreign-analysis";
-export type IndicatorCategory = "market-data" | "analytics";
+  | "foreign-analysis"
+  | "broker-accumulation";
+export type IndicatorCategory = "market-data" | "analytics" | "premium-tools";
 export type IndicatorRenderTheme = {
   volumeUp: string;
   volumeDown: string;
@@ -41,7 +42,7 @@ export type IndicatorDefinition = {
   id: IndicatorId;
   label: string;
   category: IndicatorCategory;
-  kind: "pane";
+  kind: "pane" | "workspace";
   defaultVisible: boolean;
   requires: Array<keyof HistoryBar>;
   normalization: string | null;
@@ -63,6 +64,7 @@ export const indicatorGroups: Array<{
 }> = [
   { id: "market-data", label: "Market Data" },
   { id: "analytics", label: "Analytics" },
+  { id: "premium-tools", label: "Premium Tools" },
 ];
 
 export const indicatorRegistry: Record<IndicatorId, IndicatorDefinition> = {
@@ -187,6 +189,22 @@ export const indicatorRegistry: Record<IndicatorId, IndicatorDefinition> = {
           colorToken: "--accent",
         },
       ],
+    },
+  },
+  "broker-accumulation": {
+    id: "broker-accumulation",
+    label: "Broker Accumulation",
+    category: "premium-tools",
+    kind: "workspace",
+    defaultVisible: false,
+    requires: [],
+    normalization: "Top-10 observed broker flow",
+    valueFormatter: formatCompact,
+    rendering: {
+      paneLabel: "BROKER ACCUMULATION",
+      paneLabelClassName: "pane-label--broker",
+      testId: "broker-accumulation-pane",
+      series: [],
     },
   },
 };

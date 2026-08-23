@@ -84,6 +84,25 @@ uv run --project apps/api python -m app.warehouse_cli broker BBCA --trade-date 2
 uv run --project apps/api python -m app.warehouse_cli tradebook BBCA --trade-date 2026-08-21 --request-cap 1
 ```
 
+Synchronize the provider broker directory with one bounded request:
+
+```powershell
+uv run --project apps/api python -m app.warehouse_cli brokers --request-cap 1 --concurrency 1
+```
+
+Run the bounded Broker Accumulation V1 backfill from stored trading sessions only:
+
+```powershell
+uv run --project apps/api python -m app.warehouse_cli broker-backfill BBCA BBRI BMRI BBNI TLKM ANTM AMMN AADI TINS GOTO --sessions 20 --request-cap 200 --concurrency 2
+```
+
+The backfill is idempotent: complete ticker/session checkpoints skip without a provider call.
+Rejected sessions remain `failed` and a run containing failures exits non-zero after reporting
+every result. Do not generate dates with calendar arithmetic.
+
+Tradebook and running-trade dates are not provider-asserted. Their `--trade-date` must equal the
+latest confirmed PostgreSQL EOD session; historical or active-but-unconfirmed dates fail closed.
+
 Start or resume a filtered execution tape. The same session must retain the same floor and
 action filter; changing either is blocked instead of mixing incompatible samples:
 
@@ -92,8 +111,9 @@ uv run --project apps/api python -m app.warehouse_cli running BBCA --trade-date 
 ```
 
 `complete` means the provider cursor was exhausted. `partial` preserves the opaque cursor,
-filter, floor, fetched/retained counts, and high-water value for a safe resume. No permanent
-production floor has been approved by the current evidence.
+filter, floor, provider-row fetched count, newly inserted canonical-fact retained count, and
+newest observed high-water value for a safe resume. No permanent production floor has been
+approved by the current evidence.
 
 ## Test database safety
 

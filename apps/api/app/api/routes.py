@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 
 from app.schemas.api import (
+    BrokerAccumulationResponse,
     BrokerFlowResponse,
     CoverageResponse,
     DataStatusResponse,
@@ -95,6 +96,25 @@ async def broker_flow(
     if date_to < date_from or (date_to - date_from).days > 31:
         raise HTTPException(status_code=422, detail="Broker-flow range must be 0 to 31 days")
     return await _warehouse(request).broker_flow(ticker.upper(), date_from, date_to)
+
+
+@router.get(
+    "/stocks/{ticker}/broker-accumulation",
+    response_model=BrokerAccumulationResponse,
+)
+async def broker_accumulation(
+    request: Request,
+    ticker: Ticker,
+    date_from: Annotated[date, Query(alias="from")],
+    date_to: Annotated[date, Query(alias="to")],
+) -> BrokerAccumulationResponse:
+    if date_to < date_from or (date_to - date_from).days > 45:
+        raise HTTPException(
+            status_code=422, detail="Broker-accumulation range must be 0 to 45 days"
+        )
+    return await _warehouse(request).broker_accumulation(
+        ticker.upper(), date_from, date_to
+    )
 
 
 @router.get("/stocks/{ticker}/trades", response_model=TradesResponse)

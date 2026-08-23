@@ -8,6 +8,7 @@ import pytest
 from app.providers.pluang import (
     PluangProvider,
     map_pluang_broker_summary,
+    map_pluang_brokers,
     map_pluang_orderbook,
     map_pluang_running_trades,
     map_pluang_tradebook,
@@ -33,6 +34,19 @@ def test_broker_buyers_and_sellers_preserve_capped_top_n_and_units() -> None:
     assert all(row.shares == row.lots * 100 for row in rows)
 
 
+def test_broker_directory_maps_documented_name_and_classification() -> None:
+    rows = map_pluang_brokers(_fixture("pluang_brokers.json"))
+
+    assert [(row.broker_code, row.classification) for row in rows] == [
+        ("AK", "FOREIGN"),
+        ("YP", "LOCAL"),
+        ("DX", "BUMN"),
+    ]
+    assert rows[0].broker_name == "Fixture Foreign Securities"
+    assert rows[0].gateway == "zapi"
+    assert rows[0].source_provider == "pluang"
+
+
 def test_running_trades_maps_sequence_action_lots_and_next_cursor() -> None:
     page = map_pluang_running_trades(
         _fixture("pluang_running_trades.json"), "BBCA", date(2026, 8, 21)
@@ -44,6 +58,9 @@ def test_running_trades_maps_sequence_action_lots_and_next_cursor() -> None:
     assert page.records[0].shares == 2900
     assert page.records[0].executed_at.utcoffset().total_seconds() == 7 * 3600
     assert page.records[0].aggressor_action == "SELL"
+    assert page.records[0].gateway_observed_at is not None
+    assert page.records[0].session_binding_method is None
+    assert page.records[0].provider_session_asserted is False
 
 
 def test_tradebook_normalizes_observed_price_and_time_views() -> None:
@@ -131,6 +148,7 @@ async def test_every_finance_pluang_endpoint_uses_the_server_zapi_key() -> None:
         _fixture("pluang_running_trades.json"),
         _fixture("pluang_tradebook.json"),
         _fixture("pluang_orderbook.json"),
+        _fixture("pluang_brokers.json"),
     ]
     provider = PluangProvider("fixture-key", ZAPI_BASE_URL, transport)
 
@@ -139,10 +157,11 @@ async def test_every_finance_pluang_endpoint_uses_the_server_zapi_key() -> None:
     await provider.get_running_trades("BBCA", date(2026, 8, 21))
     await provider.get_tradebook("BBCA", date(2026, 8, 21))
     await provider.get_orderbook("BBCA")
+    await provider.get_brokers()
 
     assert provider.name == "pluang"
     assert provider.gateway == "zapi"
-    assert transport.get_json.await_count == 5
+    assert transport.get_json.await_count == 6
     for request in transport.get_json.await_args_list:
         assert request.kwargs["headers"] == {"x-api-key": "fixture-key"}
         assert request.kwargs["url"].startswith(ZAPI_BASE_URL)

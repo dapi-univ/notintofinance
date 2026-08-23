@@ -73,7 +73,11 @@ export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicat
   const [ready, setReady] = useState(false);
   const filteredBars = useMemo(() => filterBarsByTimeframe(bars, timeframe), [bars, timeframe]);
   const enabledDefinitions = useMemo(
-    () => indicatorDefinitions.filter((definition) => enabledIndicators.has(definition.id)),
+    () =>
+      indicatorDefinitions.filter(
+        (definition) =>
+          definition.kind === "pane" && enabledIndicators.has(definition.id),
+      ),
     [enabledIndicators],
   );
   const enabledDefinitionsRef = useRef(enabledDefinitions);

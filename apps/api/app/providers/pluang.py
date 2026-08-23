@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from app.providers.transport import QuotaAwareTransport
 from app.schemas.warehouse import (
+    BrokerDirectoryRecord,
     BrokerFlowRecord,
     InstrumentMappingRecord,
     OrderbookLevelRecord,
@@ -81,6 +82,17 @@ class PluangProvider:
         )
         try:
             result = map_pluang_broker_summary(payload, code)
+        except ValueError as error:
+            await self._stage(raw, "rejected", str(error))
+            raise
+        await self._stage(raw, "normalized", None)
+        return result, payload
+
+    async def get_brokers(self) -> tuple[list[BrokerDirectoryRecord], dict[str, object]]:
+        payload = await self._get("brokers", {})
+        raw = self._raw_record("brokers", None, payload)
+        try:
+            result = map_pluang_brokers(payload)
         except ValueError as error:
             await self._stage(raw, "rejected", str(error))
             raise
@@ -176,7 +188,7 @@ class PluangProvider:
     def _raw_record(
         self,
         endpoint: str,
-        ticker: str,
+        ticker: str | None,
         payload: dict[str, object],
         *,
         date_from: date | None = None,
@@ -249,6 +261,43 @@ def map_pluang_broker_summary(
     return output
 
 
+def map_pluang_brokers(payload: dict[str, object]) -> list[BrokerDirectoryRecord]:
+    body = _unwrap_zapi_pluang(payload, dataset="brokers")
+    rows = body.get("items")
+    if not isinstance(rows, list):
+        raise ValueError("finance:pluang brokers items must be a list")
+    count = body.get("count")
+    if not isinstance(count, int) or count != len(rows):
+        raise ValueError("finance:pluang brokers count must match items")
+    observed_at = _gateway_observed_at(payload)
+    output: list[BrokerDirectoryRecord] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("finance:pluang broker directory row must be an object")
+        code = str(row.get("code", "")).strip().upper()
+        name = str(row.get("name", "")).strip()
+        classification = str(row.get("type", "")).strip().upper()
+        if not code or code in seen:
+            raise ValueError("finance:pluang broker directory code is missing or duplicate")
+        if not name:
+            raise ValueError("finance:pluang broker directory name is missing")
+        if classification not in {"LOCAL", "FOREIGN", "BUMN"}:
+            raise ValueError(
+                "finance:pluang broker classification must be LOCAL, FOREIGN, or BUMN"
+            )
+        seen.add(code)
+        output.append(
+            BrokerDirectoryRecord(
+                broker_code=code,
+                broker_name=name,
+                classification=classification,
+                source_observed_at=observed_at,
+            )
+        )
+    return output
+
+
 def map_pluang_running_trades(
     payload: dict[str, object], ticker: str, trade_date: date
 ) -> RunningTradesPage:
@@ -258,6 +307,7 @@ def map_pluang_running_trades(
     if not isinstance(rows, list):
         raise ValueError("finance:pluang running-trades items must be a list")
     records: list[TradePrintRecord] = []
+    observed_at = _gateway_observed_at(payload)
     seen: set[str] = set()
     for row in rows:
         if not isinstance(row, dict):
@@ -281,6 +331,8 @@ def map_pluang_running_trades(
                 lots=lots,
                 shares=lots * 100,
                 aggressor_action=action,
+                gateway_observed_at=observed_at,
+                provider_session_asserted=False,
             )
         )
     next_cursor = body.get("nextCursor")
@@ -388,16 +440,38 @@ def map_pluang_orderbook(
 
 
 def _unwrap_zapi_pluang(
-    payload: dict[str, object], *, dataset: str, ticker: str
+    payload: dict[str, object], *, dataset: str, ticker: str | None = None
 ) -> dict[str, object]:
     body = payload.get("data")
     if not isinstance(body, dict):
         raise ValueError(f"finance:pluang {dataset} data must be an object")
     if body.get("source") != "pluang":
         raise ValueError(f"finance:pluang {dataset} source must be pluang")
-    if body.get("code") != ticker:
+    if ticker is not None and body.get("code") != ticker:
         raise ValueError(f"finance:pluang {dataset} code mismatch")
     return body
+
+
+def gateway_observed_at(payload: dict[str, object]) -> datetime:
+    return _gateway_observed_at(payload)
+
+
+def tradebook_component_availability(
+    payload: dict[str, object], ticker: str
+) -> tuple[bool, bool, bool]:
+    body = _unwrap_zapi_pluang(payload, dataset="tradebook", ticker=_ticker(ticker))
+    keys = ("byPrice", "byTime", "byVolume")
+    values = [body.get(key) for key in keys]
+    if not all(isinstance(value, list) for value in values):
+        raise ValueError("finance:pluang tradebook aggregate views must be lists")
+    return tuple(bool(value) for value in values)  # type: ignore[return-value]
+
+
+def _gateway_observed_at(payload: dict[str, object]) -> datetime:
+    timestamp = payload.get("timestamp")
+    if not isinstance(timestamp, str):
+        raise ValueError("finance:pluang gateway timestamp is missing")
+    return datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone(UTC)
 
 
 def _broker_side(

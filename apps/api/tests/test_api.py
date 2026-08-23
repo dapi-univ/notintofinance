@@ -6,6 +6,27 @@ from app.services.trade_cursor import InvalidTradeCursor
 
 
 class FakeWarehouseService:
+    async def broker_accumulation(
+        self, ticker: str, date_from: object, date_to: object
+    ) -> dict[str, object]:
+        return {
+            "ticker": ticker,
+            "date_from": date_from,
+            "date_to": date_to,
+            "source_scope": "top_n",
+            "source_top_n": 10,
+            "coverage_note": "TOP-10 OBSERVED · NOT FULL MARKET",
+            "gateway": "zapi",
+            "source_provider": "pluang",
+            "coverage": {
+                "expected_sessions": [date_from, date_to],
+                "covered_sessions": [date_from],
+                "missing_sessions": [date_to],
+                "state": "partial",
+            },
+            "brokers": [],
+        }
+
     async def broker_flow(
         self, ticker: str, date_from: object, date_to: object
     ) -> dict[str, object]:
@@ -136,6 +157,9 @@ def test_database_only_warehouse_read_routes_and_coverage_contracts() -> None:
     with TestClient(app) as client:
         app.state.warehouse_service = FakeWarehouseService()
         broker = client.get("/stocks/BBCA/broker-flow?from=2026-08-21&to=2026-08-21")
+        accumulation = client.get(
+            "/stocks/BBCA/broker-accumulation?from=2026-08-20&to=2026-08-21"
+        )
         trades = client.get("/stocks/BBCA/trades?from=2026-08-21&to=2026-08-21&limit=100")
         orderbook = client.get("/stocks/BBCA/orderbook/latest")
         coverage = client.get("/data/coverage")
@@ -143,6 +167,9 @@ def test_database_only_warehouse_read_routes_and_coverage_contracts() -> None:
 
     assert broker.status_code == 200
     assert broker.json()["source_top_n"] == 10
+    assert accumulation.status_code == 200
+    assert accumulation.json()["coverage"]["state"] == "partial"
+    assert accumulation.json()["coverage_note"] == "TOP-10 OBSERVED · NOT FULL MARKET"
     assert trades.status_code == 200
     assert orderbook.json()["kind"] == "resting_liquidity_snapshot"
     assert coverage.json()["active_stocks"] == 962
@@ -154,9 +181,13 @@ def test_warehouse_routes_enforce_bounded_ranges() -> None:
     with TestClient(app) as client:
         app.state.warehouse_service = FakeWarehouseService()
         broker = client.get("/stocks/BBCA/broker-flow?from=2026-01-01&to=2026-08-21")
+        accumulation = client.get(
+            "/stocks/BBCA/broker-accumulation?from=2026-01-01&to=2026-08-21"
+        )
         trades = client.get("/stocks/BBCA/trades?from=2026-08-01&to=2026-08-21")
 
     assert broker.status_code == 422
+    assert accumulation.status_code == 422
     assert trades.status_code == 422
 
 

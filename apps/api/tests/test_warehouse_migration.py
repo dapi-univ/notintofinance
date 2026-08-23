@@ -92,3 +92,62 @@ def test_warehouse_migration_chain_and_security_contract() -> None:
     assert "unique nulls not distinct" in sufficiency_sql
     assert "collection_filter jsonb" in sufficiency_sql
     assert "rows_retained <= rows_fetched" in sufficiency_sql
+
+    accumulation_path = (
+        root
+        / "apps/api/migrations/versions/20260823160000_broker_accumulation_v1.py"
+    )
+    accumulation_spec = importlib.util.spec_from_file_location(
+        "broker_accumulation_v1", accumulation_path
+    )
+    assert accumulation_spec and accumulation_spec.loader
+    accumulation = importlib.util.module_from_spec(accumulation_spec)
+    accumulation_spec.loader.exec_module(accumulation)
+    accumulation_sql = (
+        root / "supabase/migrations/20260823160000_broker_accumulation_v1.sql"
+    ).read_text(encoding="utf-8")
+    assert accumulation.revision == "20260823160000"
+    assert accumulation.down_revision == "20260823133000"
+    for table in ("broker_directory", "tradebook_collection_sessions"):
+        assert f"create table public.{table}" in accumulation_sql
+        assert f"alter table public.{table} enable row level security" in accumulation_sql
+        assert f"revoke all on table public.{table}" in accumulation_sql
+    assert "session_binding_method" in accumulation_sql
+    assert "provider_session_asserted" in accumulation_sql
+
+    classification_path = (
+        root
+        / "apps/api/migrations/versions/20260823161500_expand_broker_classification.py"
+    )
+    classification_spec = importlib.util.spec_from_file_location(
+        "expand_broker_classification", classification_path
+    )
+    assert classification_spec and classification_spec.loader
+    classification = importlib.util.module_from_spec(classification_spec)
+    classification_spec.loader.exec_module(classification)
+    classification_sql = (
+        root / "supabase/migrations/20260823161500_expand_broker_classification.sql"
+    ).read_text(encoding="utf-8")
+    assert classification.revision == "20260823161500"
+    assert classification.down_revision == "20260823160000"
+    assert "'BUMN'" in classification_sql
+
+    availability_path = (
+        root
+        / "apps/api/migrations/versions/20260823162000_backfill_tradebook_session_availability.py"
+    )
+    availability_spec = importlib.util.spec_from_file_location(
+        "backfill_tradebook_session_availability", availability_path
+    )
+    assert availability_spec and availability_spec.loader
+    availability = importlib.util.module_from_spec(availability_spec)
+    availability_spec.loader.exec_module(availability)
+    availability_sql = (
+        root
+        / "supabase/migrations/20260823162000_backfill_tradebook_session_availability.sql"
+    ).read_text(encoding="utf-8")
+    assert availability.revision == "20260823162000"
+    assert availability.down_revision == "20260823161500"
+    assert "jsonb_array_length" in availability_sql
+    assert "provider_session_asserted" in availability_sql
+    assert "on conflict on constraint" in availability_sql

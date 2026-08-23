@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import Database, UnsafeDatabaseTarget
 from app.models.market import DailyMarketData, Stock
 from app.models.warehouse import (
+    BrokerDirectory,
     BrokerFlowDaily,
     DataQualityEvent,
     IngestionCursor,
@@ -21,10 +22,12 @@ from app.models.warehouse import (
     ProviderRequestLedger,
     RawProviderPayload,
     TradebookAggregate,
+    TradebookCollectionSession,
     TradePrint,
 )
 from app.providers.transport import ProviderRequestEvent
 from app.schemas.warehouse import (
+    BrokerDirectoryRecord,
     BrokerFlowRecord,
     IngestionCursorState,
     InstrumentMappingRecord,
@@ -32,6 +35,7 @@ from app.schemas.warehouse import (
     OrderbookSnapshotRecord,
     RawPayloadRecord,
     TradebookAggregateRecord,
+    TradebookSessionRecord,
     TradePrintRecord,
 )
 
@@ -153,6 +157,55 @@ class PostgresWarehouseRepository:
                     | (InstrumentProviderMapping.mapping_status == "transient_failure")
                 )
             return list((await session.scalars(statement.order_by(Stock.ticker))).all())
+
+    async def upsert_broker_directory(self, records: list[BrokerDirectoryRecord]) -> int:
+        if not records:
+            return 0
+        async with self._database.session() as session, session.begin():
+            values = [record.model_dump() for record in records]
+            statement = pg_insert(BrokerDirectory).values(values)
+            await session.execute(
+                statement.on_conflict_do_update(
+                    constraint="broker_directory_identity_key",
+                    set_={
+                        "broker_name": statement.excluded.broker_name,
+                        "classification": statement.excluded.classification,
+                        "gateway": statement.excluded.gateway,
+                        "source_observed_at": statement.excluded.source_observed_at,
+                        "ingested_at": func.now(),
+                    },
+                )
+            )
+        return len(records)
+
+    async def latest_market_session(self) -> date | None:
+        async with self._database.session() as session:
+            return await session.scalar(select(func.max(DailyMarketData.trade_date)))
+
+    async def ticker_has_eod(self, ticker: str, trade_date: date) -> bool:
+        async with self._database.session() as session:
+            return bool(
+                await session.scalar(
+                    select(DailyMarketData.id)
+                    .join(Stock, Stock.id == DailyMarketData.stock_id)
+                    .where(
+                        Stock.ticker == ticker.upper(),
+                        DailyMarketData.trade_date == trade_date,
+                    )
+                    .limit(1)
+                )
+            )
+
+    async def latest_eod_sessions(self, ticker: str, *, limit: int) -> list[date]:
+        async with self._database.session() as session:
+            rows = await session.scalars(
+                select(DailyMarketData.trade_date)
+                .join(Stock, Stock.id == DailyMarketData.stock_id)
+                .where(Stock.ticker == ticker.upper())
+                .order_by(DailyMarketData.trade_date.desc())
+                .limit(limit)
+            )
+            return list(reversed(rows.all()))
 
     async def stage_raw_payload(self, record: RawPayloadRecord) -> None:
         sanitized = _sanitize(record.payload)
@@ -314,6 +367,27 @@ class PostgresWarehouseRepository:
         inserted = len(set(identities) - existing)
         return inserted, len(records) - inserted
 
+    async def upsert_tradebook_session(self, record: TradebookSessionRecord) -> None:
+        async with self._database.session() as session, session.begin():
+            stock_id = await self._stock_id(session, record.ticker)
+            values = {"stock_id": stock_id, **record.model_dump(exclude={"ticker"})}
+            statement = pg_insert(TradebookCollectionSession).values(values)
+            await session.execute(
+                statement.on_conflict_do_update(
+                    constraint="tradebook_collection_sessions_identity_key",
+                    set_={
+                        "price_available": statement.excluded.price_available,
+                        "time_available": statement.excluded.time_available,
+                        "volume_available": statement.excluded.volume_available,
+                        "processed_successfully": statement.excluded.processed_successfully,
+                        "gateway_observed_at": statement.excluded.gateway_observed_at,
+                        "session_binding_method": statement.excluded.session_binding_method,
+                        "provider_session_asserted": statement.excluded.provider_session_asserted,
+                        "ingested_at": func.now(),
+                    },
+                )
+            )
+
     async def upsert_trade_prints(self, records: list[TradePrintRecord]) -> tuple[int, int]:
         if not records:
             return 0, 0
@@ -351,6 +425,9 @@ class PostgresWarehouseRepository:
                         "lots": statement.excluded.lots,
                         "shares": statement.excluded.shares,
                         "aggressor_action": statement.excluded.aggressor_action,
+                        "gateway_observed_at": statement.excluded.gateway_observed_at,
+                        "session_binding_method": statement.excluded.session_binding_method,
+                        "provider_session_asserted": statement.excluded.provider_session_asserted,
                         "fetched_at": func.now(),
                     },
                 )
@@ -642,6 +719,53 @@ class PostgresWarehouseRepository:
                     )
                 ).all()
             )
+
+    async def broker_accumulation(
+        self, ticker: str, date_from: date, date_to: date
+    ) -> tuple[list[date], list[tuple[BrokerFlowDaily, BrokerDirectory | None]]]:
+        async with self._database.session() as session:
+            stock_id = await self._stock_id(session, ticker)
+            sessions = list(
+                (
+                    await session.scalars(
+                        select(DailyMarketData.trade_date)
+                        .where(
+                            DailyMarketData.stock_id == stock_id,
+                            DailyMarketData.trade_date.between(date_from, date_to),
+                        )
+                        .order_by(DailyMarketData.trade_date)
+                    )
+                ).all()
+            )
+            rows = list(
+                (
+                    await session.execute(
+                        select(BrokerFlowDaily, BrokerDirectory)
+                        .outerjoin(
+                            BrokerDirectory,
+                            and_(
+                                BrokerDirectory.source_provider
+                                == BrokerFlowDaily.provider,
+                                BrokerDirectory.broker_code
+                                == BrokerFlowDaily.broker_code,
+                            ),
+                        )
+                        .where(
+                            BrokerFlowDaily.stock_id == stock_id,
+                            BrokerFlowDaily.trade_date_from
+                            == BrokerFlowDaily.trade_date_to,
+                            BrokerFlowDaily.trade_date_to.between(date_from, date_to),
+                        )
+                        .order_by(
+                            BrokerFlowDaily.trade_date_to,
+                            BrokerFlowDaily.side,
+                            BrokerFlowDaily.rank,
+                            BrokerFlowDaily.broker_code,
+                        )
+                    )
+                ).all()
+            )
+            return sessions, [(row[0], row[1]) for row in rows]
 
     async def trades(
         self,

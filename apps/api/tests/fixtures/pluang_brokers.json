@@ -1,0 +1,25 @@
+{
+  "data": {
+    "count": 3,
+    "items": [
+      {
+        "code": "AK",
+        "name": "Fixture Foreign Securities",
+        "type": "FOREIGN"
+      },
+      {
+        "code": "YP",
+        "name": "Fixture Local Securities",
+        "type": "LOCAL"
+      },
+      {
+        "code": "DX",
+        "name": "Fixture State Securities",
+        "type": "BUMN"
+      }
+    ],
+    "source": "pluang"
+  },
+  "project": "finance:pluang",
+  "timestamp": "2026-08-23T07:01:33Z"
+}

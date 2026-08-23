@@ -1,17 +1,20 @@
 import asyncio
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Protocol
+from zoneinfo import ZoneInfo
 
+from app.providers.pluang import gateway_observed_at, tradebook_component_availability
 from app.schemas.warehouse import (
     BrokerFlowRecord,
     IngestionCursorState,
     MarketPriorityCandidate,
     RunningTradesPage,
     TradebookAggregateRecord,
+    TradebookSessionRecord,
     TradePrintRecord,
 )
 
@@ -37,6 +40,10 @@ class CollectionProvider(Protocol):
 
 
 class CollectionRepository(Protocol):
+    async def latest_market_session(self) -> date | None: ...
+
+    async def ticker_has_eod(self, ticker: str, trade_date: date) -> bool: ...
+
     async def ingestion_cursor(
         self, *, ticker: str, provider: str, dataset: str, session_date: date
     ) -> IngestionCursorState | None: ...
@@ -71,6 +78,8 @@ class CollectionRepository(Protocol):
         self, records: list[TradebookAggregateRecord]
     ) -> tuple[int, int]: ...
 
+    async def upsert_tradebook_session(self, record: TradebookSessionRecord) -> None: ...
+
     async def upsert_trade_prints(
         self, records: list[TradePrintRecord]
     ) -> tuple[int, int]: ...
@@ -85,6 +94,7 @@ class CollectionResult:
     rows_fetched: int
     rows_retained: int
     cursor_remaining: bool = False
+    coverage_scope: str | None = None
     error: str | None = None
 
 
@@ -149,12 +159,25 @@ def request_economics(
     }
 
 
+def newest_provider_sequence(records: Sequence[TradePrintRecord]) -> str:
+    if not records:
+        raise ValueError("at least one trade record is required")
+    if all(record.provider_sequence.isdecimal() for record in records):
+        return max(records, key=lambda record: int(record.provider_sequence)).provider_sequence
+    return records[0].provider_sequence
+
+
 class MarketCollectionService:
     def __init__(
-        self, provider: CollectionProvider, repository: CollectionRepository
+        self,
+        provider: CollectionProvider,
+        repository: CollectionRepository,
+        *,
+        now: Callable[[], datetime] | None = None,
     ) -> None:
         self._provider = provider
         self._repository = repository
+        self._now = now or (lambda: datetime.now(UTC))
 
     async def collect_broker_daily(
         self, tickers: Sequence[str], *, trade_date: date, concurrency: int = 2
@@ -199,6 +222,15 @@ class MarketCollectionService:
         self, ticker: str, trade_date: date, dataset: str
     ) -> CollectionResult:
         full_dataset = f"finance:pluang/{dataset}"
+        if dataset == "tradebook":
+            try:
+                await self._validate_ephemeral_session(ticker, trade_date)
+            except ValueError as error:
+                message = str(error)
+                await self._set_cursor(
+                    ticker, dataset, trade_date, status="blocked", error_message=message
+                )
+                return CollectionResult(ticker, dataset, "blocked", 0, 0, 0, error=message)
         if await self._repository.has_terminal_quality_block(
             ticker=ticker, provider="pluang", dataset=full_dataset
         ):
@@ -228,26 +260,47 @@ class MarketCollectionService:
         try:
             await self._set_cursor(ticker, dataset, trade_date, status="running")
             if dataset == "broker-summary":
-                broker_rows, _ = await self._provider.get_broker_summary(
+                broker_rows, payload = await self._provider.get_broker_summary(
                     ticker, trade_date
                 )
-                await self._repository.upsert_broker_flow(broker_rows)
+                self._validate_broker_response_date(payload, trade_date)
+                inserted, _ = await self._repository.upsert_broker_flow(broker_rows)
                 count = len(broker_rows)
+                retained = inserted
             else:
-                tradebook_rows, _ = await self._provider.get_tradebook(
+                tradebook_rows, payload = await self._provider.get_tradebook(
                     ticker, trade_date, tab="ALL"
                 )
-                await self._repository.upsert_tradebook(tradebook_rows)
+                observed_at = gateway_observed_at(payload)
+                tradebook_rows = [
+                    row.model_copy() for row in tradebook_rows
+                ]
+                inserted, _ = await self._repository.upsert_tradebook(tradebook_rows)
                 count = len(tradebook_rows)
+                retained = inserted
+                price, time_available, volume = tradebook_component_availability(
+                    payload, ticker
+                )
+                await self._repository.upsert_tradebook_session(
+                    TradebookSessionRecord(
+                        ticker=ticker,
+                        trade_date=trade_date,
+                        price_available=price,
+                        time_available=time_available,
+                        volume_available=volume,
+                        processed_successfully=True,
+                        gateway_observed_at=observed_at,
+                    )
+                )
             await self._set_cursor(
                 ticker,
                 dataset,
                 trade_date,
                 status="complete",
                 rows_fetched=count,
-                rows_retained=count,
+                rows_retained=retained,
             )
-            return CollectionResult(ticker, dataset, "complete", 1, count, count)
+            return CollectionResult(ticker, dataset, "complete", 1, count, retained)
         except Exception as error:
             message = str(error)[:500]
             await self._set_cursor(
@@ -277,6 +330,20 @@ class MarketCollectionService:
 
         async def collect(ticker: str) -> CollectionResult:
             async with semaphore:
+                try:
+                    await self._validate_ephemeral_session(ticker, trade_date)
+                except ValueError as error:
+                    message = str(error)
+                    await self._set_cursor(
+                        ticker,
+                        "running-trades",
+                        trade_date,
+                        status="blocked",
+                        error_message=message,
+                    )
+                    return CollectionResult(
+                        ticker, "running-trades", "blocked", 0, 0, 0, error=message
+                    )
                 price = reference_prices.get(ticker)
                 if price is None:
                     await self._set_cursor(
@@ -400,7 +467,7 @@ class MarketCollectionService:
                 rows_retained=retained,
             )
             for _ in range(max_pages):
-                page, _ = await self._provider.get_running_trades(
+                page, payload = await self._provider.get_running_trades(
                     ticker,
                     trade_date,
                     cursor=cursor,
@@ -412,11 +479,21 @@ class MarketCollectionService:
                 deduplicated = {
                     record.provider_sequence: record for record in page.records
                 }
-                accepted = list(deduplicated.values())
-                await self._repository.upsert_trade_prints(accepted)
-                retained += len(accepted)
-                if accepted:
-                    high_water = accepted[-1].provider_sequence
+                observed_at = gateway_observed_at(payload)
+                accepted = [
+                    record.model_copy(
+                        update={
+                            "gateway_observed_at": observed_at,
+                            "session_binding_method": "confirmed_latest_eod",
+                            "provider_session_asserted": False,
+                        }
+                    )
+                    for record in deduplicated.values()
+                ]
+                inserted, _ = await self._repository.upsert_trade_prints(accepted)
+                retained += inserted
+                if accepted and high_water is None:
+                    high_water = newest_provider_sequence(accepted)
                 cursor = page.next_cursor
                 status = "complete" if cursor is None else "running"
                 await self._set_cursor(
@@ -455,6 +532,7 @@ class MarketCollectionService:
                 fetched,
                 retained,
                 cursor_remaining=bool(cursor),
+                coverage_scope="filtered" if min_lot or normalized_action else "unfiltered",
             )
         except Exception as error:
             message = str(error)[:500]
@@ -479,8 +557,32 @@ class MarketCollectionService:
                 fetched,
                 retained,
                 cursor_remaining=bool(cursor),
+                coverage_scope="filtered" if min_lot or normalized_action else "unfiltered",
                 error=message,
             )
+
+    async def _validate_ephemeral_session(self, ticker: str, requested: date) -> None:
+        latest = await self._repository.latest_market_session()
+        if latest is None:
+            raise ValueError("ephemeral collection requires a confirmed latest EOD session")
+        if requested != latest:
+            raise ValueError(
+                "ephemeral collection date must equal the latest confirmed EOD session"
+            )
+        if not await self._repository.ticker_has_eod(ticker, requested):
+            raise ValueError("ticker has no validated EOD row for the confirmed session")
+        jakarta_now = self._now().astimezone(ZoneInfo("Asia/Jakarta"))
+        if jakarta_now.date() > latest and jakarta_now.weekday() < 5:
+            raise ValueError("newer market day is not yet confirmed by EOD data")
+
+    @staticmethod
+    def _validate_broker_response_date(payload: dict[str, object], requested: date) -> None:
+        body = payload.get("data")
+        if not isinstance(body, dict):
+            raise ValueError("finance:pluang broker-summary data must be an object")
+        expected = requested.isoformat()
+        if body.get("startDate") != expected or body.get("endDate") != expected:
+            raise ValueError("broker-summary response date does not match requested session")
 
     async def _set_cursor(
         self,

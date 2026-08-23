@@ -8,6 +8,7 @@ describe("indicator registry", () => {
       "volume",
       "frequency-analyzer",
       "foreign-analysis",
+      "broker-accumulation",
     ]);
     expect(indicatorRegistry.volume.defaultVisible).toBe(true);
     expect(indicatorRegistry.volume.category).toBe("market-data");
@@ -26,5 +27,9 @@ describe("indicator registry", () => {
         (series) => series.id,
       ),
     ).toEqual(["buy", "sell", "net", "cumulative"]);
+    expect(indicatorRegistry["broker-accumulation"]).toMatchObject({
+      kind: "workspace",
+      defaultVisible: false,
+    });
   });
 });

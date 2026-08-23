@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from app.schemas.warehouse import (
@@ -24,6 +24,19 @@ class CollectionRepository:
         self.broker_identities: set[tuple[object, ...]] = set()
         self.trade_identities: set[str] = set()
         self.tradebook_identities: set[tuple[str, str]] = set()
+        self.latest_session = date(2026, 8, 21)
+        self.tradebook_sessions: list[object] = []
+        self.upserted_trades: list[TradePrintRecord] = []
+
+    async def latest_market_session(self) -> date | None:
+        return self.latest_session
+
+    async def ticker_has_eod(self, ticker: str, trade_date: date) -> bool:
+        del ticker
+        return trade_date == self.latest_session
+
+    async def upsert_tradebook_session(self, record: object) -> None:
+        self.tradebook_sessions.append(record)
 
     async def ingestion_cursor(self, **values: object) -> IngestionCursorState | None:
         return self.cursors.get(
@@ -74,6 +87,7 @@ class CollectionRepository:
     async def upsert_trade_prints(
         self, records: list[TradePrintRecord]
     ) -> tuple[int, int]:
+        self.upserted_trades.extend(records)
         before = len(self.trade_identities)
         self.trade_identities.update(row.provider_sequence for row in records)
         inserted = len(self.trade_identities) - before
@@ -104,12 +118,26 @@ class CollectionProvider:
                 source_scope="top_n",
                 source_top_n=10,
             )
-        ], {}
+        ], {
+            "data": {
+                "startDate": trade_date.isoformat(),
+                "endDate": trade_date.isoformat(),
+            }
+        }
 
     async def get_tradebook(
-        self, *_: object, **__: object
+        self, ticker: str, *_: object, **__: object
     ) -> tuple[list[TradebookAggregateRecord], dict[str, object]]:
-        return [], {}
+        return [], {
+            "data": {
+                "code": ticker,
+                "source": "pluang",
+                "byPrice": [{"price": 1}],
+                "byTime": [{"time": "09:00:00"}],
+                "byVolume": [],
+            },
+            "timestamp": "2026-08-21T09:30:00Z",
+        }
 
     async def get_running_trades(
         self,
@@ -140,7 +168,7 @@ class CollectionProvider:
                 )
             ],
             next_cursor="opaque-next" if cursor is None else None,
-        ), {}
+        ), {"timestamp": "2026-08-21T09:30:00Z"}
 
 
 def _candidate(
@@ -214,6 +242,32 @@ async def test_full_candidate_broker_collection_is_idempotent() -> None:
     assert len(repository.broker_identities) == 2
 
 
+async def test_broker_summary_rejects_silent_historical_date_substitution() -> None:
+    provider = CollectionProvider()
+    repository = CollectionRepository()
+    service = MarketCollectionService(provider, repository)  # type: ignore[arg-type]
+    original = provider.get_broker_summary
+
+    async def wrong_date(
+        ticker: str, trade_date: date
+    ) -> tuple[list[BrokerFlowRecord], dict[str, object]]:
+        rows, payload = await original(ticker, trade_date)
+        body = payload["data"]
+        assert isinstance(body, dict)
+        body["endDate"] = "2026-08-20"
+        return rows, payload
+
+    provider.get_broker_summary = wrong_date  # type: ignore[method-assign]
+
+    result = await service.collect_broker_daily(
+        ["BBCA"], trade_date=date(2026, 8, 21), concurrency=1
+    )
+
+    assert result[0].status == "failed"
+    assert "does not match" in (result[0].error or "")
+    assert repository.broker_identities == set()
+
+
 async def test_running_cursor_is_partial_then_resumes_to_complete_with_same_filter() -> None:
     provider = CollectionProvider()
     repository = CollectionRepository()
@@ -238,6 +292,8 @@ async def test_running_cursor_is_partial_then_resumes_to_complete_with_same_filt
     assert state.status == "complete"
     assert state.rows_fetched == state.rows_retained == 2
     assert state.collection_filter["minLot"] == 16
+    assert state.high_water_mark == "PAGE-1"
+    assert complete[0].coverage_scope == "filtered"
     assert provider.running_calls == [
         {"ticker": "BBCA", "cursor": None, "min_lot": 16, "action": "SELL"},
         {
@@ -274,3 +330,188 @@ async def test_resumable_session_rejects_a_different_collection_floor() -> None:
 
     assert blocked[0].status == "blocked"
     assert len(provider.running_calls) == 1
+
+
+async def test_ephemeral_collection_rejects_non_latest_and_active_unconfirmed_day() -> None:
+    provider = CollectionProvider()
+    repository = CollectionRepository()
+    historical = MarketCollectionService(
+        provider,
+        repository,  # type: ignore[arg-type]
+        now=lambda: datetime(2026, 8, 23, 2, tzinfo=UTC),
+    )
+    active_day = MarketCollectionService(
+        provider,
+        repository,  # type: ignore[arg-type]
+        now=lambda: datetime(2026, 8, 24, 2, tzinfo=UTC),
+    )
+
+    old = await historical.collect_tradebook(
+        ["BBCA"], trade_date=date(2026, 8, 20), concurrency=1
+    )
+    unconfirmed = await active_day.collect_running_trades(
+        ["BBCA"],
+        trade_date=date(2026, 8, 21),
+        reference_prices={"BBCA": Decimal("6450")},
+        min_trade_value_idr=Decimal(0),
+        concurrency=1,
+    )
+
+    assert old[0].status == "blocked"
+    assert "latest confirmed" in (old[0].error or "")
+    assert unconfirmed[0].status == "blocked"
+    assert "newer market day" in (unconfirmed[0].error or "")
+    assert provider.running_calls == []
+
+
+async def test_weekend_latest_session_binds_unasserted_provider_observation() -> None:
+    provider = CollectionProvider()
+    repository = CollectionRepository()
+    service = MarketCollectionService(
+        provider,
+        repository,  # type: ignore[arg-type]
+        now=lambda: datetime(2026, 8, 23, 2, tzinfo=UTC),
+    )
+
+    result = await service.collect_running_trades(
+        ["BBCA"],
+        trade_date=date(2026, 8, 21),
+        reference_prices={"BBCA": Decimal("6450")},
+        min_trade_value_idr=Decimal(0),
+        max_pages=2,
+        concurrency=1,
+    )
+
+    assert result[0].status == "complete"
+    assert result[0].coverage_scope == "unfiltered"
+    assert repository.upserted_trades
+    assert all(
+        row.session_binding_method == "confirmed_latest_eod"
+        and row.provider_session_asserted is False
+        and row.gateway_observed_at is not None
+        for row in repository.upserted_trades
+    )
+
+
+async def test_tradebook_records_component_availability_without_fabricating_volume() -> None:
+    provider = CollectionProvider()
+    repository = CollectionRepository()
+    service = MarketCollectionService(provider, repository)  # type: ignore[arg-type]
+
+    result = await service.collect_tradebook(
+        ["BBCA"], trade_date=date(2026, 8, 21), concurrency=1
+    )
+
+    session = repository.tradebook_sessions[0]
+    assert result[0].status == "complete"
+    assert session.price_available is True  # type: ignore[attr-defined]
+    assert session.time_available is True  # type: ignore[attr-defined]
+    assert session.volume_available is False  # type: ignore[attr-defined]
+    assert session.provider_session_asserted is False  # type: ignore[attr-defined]
+
+
+class OverlapProvider(CollectionProvider):
+    async def get_running_trades(
+        self,
+        ticker: str,
+        trade_date: date,
+        *,
+        cursor: str | None = None,
+        min_lot: int | None = None,
+        action: str | None = None,
+    ) -> tuple[RunningTradesPage, dict[str, object]]:
+        del min_lot, action
+        sequences = ["200", "199"] if cursor is None else ["199", "198"]
+        records = [
+            TradePrintRecord(
+                ticker=ticker,
+                provider_sequence=sequence,
+                trade_date=trade_date,
+                executed_at=datetime.fromisoformat(
+                    f"{trade_date.isoformat()}T10:00:00+07:00"
+                ),
+                price=Decimal("6450"),
+                lots=1,
+                shares=100,
+                aggressor_action="BUY",
+            )
+            for sequence in sequences
+        ]
+        return RunningTradesPage(
+            records=records, next_cursor="older" if cursor is None else None
+        ), {"timestamp": "2026-08-21T09:30:00Z"}
+
+
+async def test_running_newest_head_overlap_and_retry_counters_are_truthful() -> None:
+    provider = OverlapProvider()
+    repository = CollectionRepository()
+    service = MarketCollectionService(provider, repository)  # type: ignore[arg-type]
+
+    result = await service.collect_running_trades(
+        ["BBCA"],
+        trade_date=date(2026, 8, 21),
+        reference_prices={"BBCA": Decimal("6450")},
+        min_trade_value_idr=Decimal(0),
+        max_pages=2,
+        concurrency=1,
+    )
+    state = repository.cursors[("BBCA", "running-trades", date(2026, 8, 21))]
+
+    assert result[0].rows_fetched == 4
+    assert result[0].rows_retained == 3
+    assert state.high_water_mark == "200"
+    assert state.status == "complete"
+
+
+async def test_legacy_partial_cursor_preserves_original_head() -> None:
+    provider = OverlapProvider()
+    repository = CollectionRepository()
+    repository.trade_identities.update({"200", "199"})
+    repository.cursors[("BBCA", "running-trades", date(2026, 8, 21))] = (
+        IngestionCursorState(
+            instrument_key="BBCA",
+            session_date=date(2026, 8, 21),
+            cursor_value="legacy-older",
+            high_water_mark="17839",
+            status="partial",
+            collection_filter={
+                "minTradeValueIdr": "0",
+                "referencePrice": "6450",
+            },
+            collection_floor_idr=Decimal(0),
+        )
+    )
+    service = MarketCollectionService(provider, repository)  # type: ignore[arg-type]
+
+    result = await service.collect_running_trades(
+        ["BBCA"],
+        trade_date=date(2026, 8, 21),
+        reference_prices={"BBCA": Decimal("6450")},
+        min_trade_value_idr=Decimal(0),
+        max_pages=1,
+        concurrency=1,
+    )
+    state = repository.cursors[("BBCA", "running-trades", date(2026, 8, 21))]
+
+    assert result[0].rows_retained == 1
+    assert state.high_water_mark == "17839"
+
+
+async def test_all_updated_repeated_page_retains_zero_unique_facts() -> None:
+    provider = OverlapProvider()
+    repository = CollectionRepository()
+    repository.trade_identities.update({"200", "199"})
+    service = MarketCollectionService(provider, repository)  # type: ignore[arg-type]
+
+    result = await service.collect_running_trades(
+        ["BBCA"],
+        trade_date=date(2026, 8, 21),
+        reference_prices={"BBCA": Decimal("6450")},
+        min_trade_value_idr=Decimal(0),
+        max_pages=1,
+        concurrency=1,
+    )
+
+    assert result[0].status == "partial"
+    assert result[0].rows_fetched == 2
+    assert result[0].rows_retained == 0

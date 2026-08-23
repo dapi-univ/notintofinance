@@ -33,6 +33,22 @@ ticker. Both `finance:idx` and `finance:pluang` consume the same persisted Zapi 
 - Coverage: `capped=true` is persisted as `source_scope='top_n'` with the documented count in
   `source_top_n`; it is never represented as complete-market broker flow.
 - Units: one lot is converted deterministically to 100 shares.
+- Historical contract: `startDate=endDate` is validated against the requested stored EOD
+  session before any row is retained. A substituted date fails the ticker/session.
+- Observed data quality: some normalized envelopes contain negative signed fields despite the
+  documented non-negative examples. Those sessions are rejected and remain resumable; the
+  adapter does not silently take absolute values or fabricate valid activity.
+
+## Broker directory
+
+- Path: `GET /brokers`
+- Parameters: optional `type=LOCAL|FOREIGN`; operations use one unfiltered request.
+- Data: `items[]` with canonical broker `code`, provider `name`, and provider classification;
+  outer `count` must match the array length.
+- Live bounded observation: 93 entries (66 LOCAL, 23 FOREIGN, 4 BUMN). BUMN is preserved as
+  provider metadata rather than guessed into local/foreign.
+- Provenance: gateway `zapi`, source provider `pluang`, source-observed timestamp, and ingestion
+  timestamp are stored separately.
 
 This is distinct from `finance:idx/broker-summary`, which is market-wide broker activity and
 does not provide a stock ticker or BUY/SELL side. It is reserved as a separate future dataset
@@ -52,6 +68,12 @@ and is not substituted for per-stock flow.
 - Collection floor: a requested IDR floor is translated with
   `ceil(min_trade_value_idr / (reference_price * 100))`. This is a storage/collection filter,
   not an analytical Big Money threshold.
+- Session binding: the endpoint accepts no historical date and asserts no session date.
+  Collection is allowed only for the latest PostgreSQL-confirmed EOD session with an EOD row
+  for the ticker, and is blocked while a newer weekday session is unconfirmed.
+- `high_water_mark` is the newest observed head; the opaque cursor continues toward older rows.
+  Fetched counts are provider rows and retained counts are newly inserted canonical facts, so
+  overlaps and retries do not inflate retention.
 
 ## Tradebook aggregates
 
@@ -65,6 +87,9 @@ and is not substituted for per-stock flow.
   and a non-empty unvalidated volume shape is rejected instead of guessed.
 - Contract: efficient daily structural aggregates. It can support price-level/directional
   research, but cannot replace running-trade sequencing or print-size distributions.
+- Component availability is persisted independently. A successful empty `byVolume` is
+  unavailable, not a synthesized zero-volume distribution. Tradebook uses the same
+  `confirmed_latest_eod` fail-closed session binding as running trades.
 
 ## Orderbook
 

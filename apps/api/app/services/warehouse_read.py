@@ -1,7 +1,9 @@
 from datetime import date
 
+from app.analytics.broker_accumulation import build_broker_accumulation
 from app.repositories.warehouse import PostgresWarehouseRepository
 from app.schemas.api import (
+    BrokerAccumulationResponse,
     BrokerFlowItemResponse,
     BrokerFlowResponse,
     CoverageResponse,
@@ -45,6 +47,20 @@ class WarehouseReadService:
                 )
                 for row in rows
             ],
+        )
+
+    async def broker_accumulation(
+        self, ticker: str, date_from: date, date_to: date
+    ) -> BrokerAccumulationResponse:
+        sessions, rows = await self._repository.broker_accumulation(
+            ticker, date_from, date_to
+        )
+        return build_broker_accumulation(
+            ticker=ticker,
+            date_from=date_from,
+            date_to=date_to,
+            expected_sessions=sessions,
+            rows=rows,
         )
 
     async def trades(

@@ -116,7 +116,72 @@ async function routeLargeAadiUniverse(page: Page) {
   );
 }
 
+async function routeBrokerAccumulation(page: Page, available = true) {
+  await page.route("**/stocks/*/broker-accumulation?*", (route) => {
+    const url = new URL(route.request().url());
+    const ticker = url.pathname.split("/")[2] ?? "BBCA";
+    return route.fulfill({
+      json: {
+        ticker,
+        from: url.searchParams.get("from"),
+        to: url.searchParams.get("to"),
+        source_scope: "top_n",
+        source_top_n: 10,
+        coverage_note: "TOP-10 OBSERVED · NOT FULL MARKET",
+        gateway: "zapi",
+        source_provider: "pluang",
+        coverage: {
+          expected_sessions: ["2026-08-20", "2026-08-21"],
+          covered_sessions: available ? ["2026-08-20", "2026-08-21"] : [],
+          missing_sessions: available ? [] : ["2026-08-20", "2026-08-21"],
+          state: available ? "complete" : "unavailable",
+        },
+        brokers: available
+          ? [{
+              broker_code: "AK",
+              broker_name: "Verified Broker",
+              classification: "FOREIGN",
+              observed_top_n_buy_value: 1000,
+              observed_top_n_sell_value: 400,
+              observed_top_n_net_value: 600,
+              observed_top_n_buy_lots: 10,
+              observed_top_n_sell_lots: 4,
+              observed_top_n_net_lots: 6,
+              observed_top_n_buy_shares: 1000,
+              observed_top_n_sell_shares: 400,
+              observed_top_n_net_shares: 600,
+              buy_appearances: 1,
+              sell_appearances: 1,
+              latest_buy_rank: 1,
+              latest_sell_rank: 2,
+              daily: [
+                {
+                  trade_date: "2026-08-20",
+                  buy_observed: true,
+                  sell_observed: false,
+                  observed_top_n_buy_value: 1000,
+                  observed_top_n_sell_value: 0,
+                  observed_top_n_net_value: 1000,
+                  cumulative_observed_top_n_net_value: 1000,
+                  observed_top_n_buy_lots: 10,
+                  observed_top_n_sell_lots: 0,
+                  observed_top_n_net_lots: 10,
+                  cumulative_observed_top_n_net_lots: 10,
+                  observed_top_n_buy_shares: 1000,
+                  observed_top_n_sell_shares: 0,
+                  observed_top_n_net_shares: 1000,
+                  cumulative_observed_top_n_net_shares: 1000,
+                },
+              ],
+            }]
+          : [],
+      },
+    });
+  });
+}
+
 test("critical Dashboard V0 workspace flow", async ({ page }) => {
+  await routeBrokerAccumulation(page);
   await page.goto("/app");
 
   await expect(page).toHaveTitle("KEJORA · Equity Research Tools");
@@ -146,6 +211,22 @@ test("critical Dashboard V0 workspace flow", async ({ page }) => {
   await page.getByText("Indicators", { exact: true }).click();
   await page.getByLabel("Frequency Analyzer").check();
   await expect(page.getByTestId("frequency-analyzer-pane")).toBeVisible();
+
+  const chartHeightBeforeBroker = await page
+    .getByTestId("market-chart")
+    .evaluate((element) => element.getBoundingClientRect().height);
+  const brokerAccumulationToggle = page.getByRole("checkbox", {
+    name: "Broker Accumulation Top-10",
+  });
+  await brokerAccumulationToggle.check();
+  await expect(page.getByTestId("broker-accumulation-pane")).toBeVisible();
+  await expect(page.getByText("TOP-10 OBSERVED · NOT FULL MARKET")).toBeVisible();
+  const chartHeightWithBroker = await page
+    .getByTestId("market-chart")
+    .evaluate((element) => element.getBoundingClientRect().height);
+  expect(chartHeightWithBroker).toBeLessThan(chartHeightBeforeBroker);
+  await brokerAccumulationToggle.uncheck();
+  await expect(page.getByTestId("broker-accumulation-pane")).toBeHidden();
 
   await page.getByLabel("Foreign Analysis").check();
   await expect(page.getByTestId("foreign-analysis-pane")).toBeVisible();

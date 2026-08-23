@@ -1,6 +1,6 @@
 # Alembic Model Drift Audit
 
-Audited against the live PostgreSQL schema at Alembic head `20260823133000` on
+Audited against the live PostgreSQL schema at Alembic head `20260823162000` on
 2026-08-23. No migration was generated or applied for this audit.
 
 `alembic check` reports 82 operations. These are metadata-representation drift: the live
@@ -134,3 +134,8 @@ the session-scoped cursor identity/status, or the collection filter/floor/count 
 The operation count decreased by two because cursor identity and status metadata are now
 aligned. The remaining 82 pre-existing items retain the classifications above and must not
 be applied as generated removals.
+
+The Microstructure Correctness Gate additions are also represented in metadata. Alembic
+reports no operation for `broker_directory`, `tradebook_collection_sessions`, the trade-print
+session provenance columns, or their new constraints and index. The standard check therefore
+remains at the same 82 pre-existing representation-only operations after this schema expansion.

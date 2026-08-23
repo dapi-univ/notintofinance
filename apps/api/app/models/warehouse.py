@@ -108,6 +108,46 @@ class BrokerFlowDaily(Base):
     )
 
 
+class BrokerDirectory(Base):
+    __tablename__ = "broker_directory"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_provider", "broker_code", name="broker_directory_identity_key"
+        ),
+        CheckConstraint(
+            "classification is null or classification in ('LOCAL', 'FOREIGN', 'BUMN')",
+            name="broker_directory_classification_check",
+        ),
+        CheckConstraint(
+            "length(btrim(broker_code)) > 0",
+            name="broker_directory_code_not_blank",
+        ),
+        CheckConstraint(
+            "length(btrim(broker_name)) > 0",
+            name="broker_directory_name_not_blank",
+        ),
+        CheckConstraint(
+            "length(btrim(gateway)) > 0",
+            name="broker_directory_gateway_not_blank",
+        ),
+        CheckConstraint(
+            "length(btrim(source_provider)) > 0",
+            name="broker_directory_source_not_blank",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    broker_code: Mapped[str] = mapped_column(Text)
+    broker_name: Mapped[str] = mapped_column(Text)
+    classification: Mapped[str | None] = mapped_column(Text)
+    gateway: Mapped[str] = mapped_column(Text)
+    source_provider: Mapped[str] = mapped_column(Text)
+    source_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class TradebookAggregate(Base):
     __tablename__ = "tradebook_aggregates"
     __table_args__ = (
@@ -181,8 +221,49 @@ class TradebookAggregate(Base):
     )
 
 
+class TradebookCollectionSession(Base):
+    __tablename__ = "tradebook_collection_sessions"
+    __table_args__ = (
+        UniqueConstraint(
+            "stock_id", "provider", "trade_date",
+            name="tradebook_collection_sessions_identity_key",
+        ),
+        CheckConstraint(
+            "session_binding_method = 'confirmed_latest_eod'",
+            name="tradebook_collection_sessions_binding_check",
+        ),
+        Index(
+            "tradebook_collection_sessions_stock_date_idx",
+            "stock_id",
+            text("trade_date desc"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    stock_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stocks.id", ondelete="CASCADE"))
+    provider: Mapped[str] = mapped_column(Text)
+    trade_date: Mapped[date] = mapped_column(Date)
+    price_available: Mapped[bool] = mapped_column(Boolean)
+    time_available: Mapped[bool] = mapped_column(Boolean)
+    volume_available: Mapped[bool] = mapped_column(Boolean)
+    processed_successfully: Mapped[bool] = mapped_column(Boolean)
+    gateway_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    session_binding_method: Mapped[str] = mapped_column(Text)
+    provider_session_asserted: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class TradePrint(Base):
     __tablename__ = "trade_prints"
+    __table_args__ = (
+        CheckConstraint(
+            "session_binding_method is null "
+            "or session_binding_method = 'confirmed_latest_eod'",
+            name="trade_prints_session_binding_check",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     stock_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stocks.id", ondelete="CASCADE"))
@@ -194,6 +275,11 @@ class TradePrint(Base):
     lots: Mapped[int] = mapped_column(BigInteger)
     shares: Mapped[int] = mapped_column(BigInteger)
     aggressor_action: Mapped[str | None] = mapped_column(Text)
+    gateway_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    session_binding_method: Mapped[str | None] = mapped_column(Text)
+    provider_session_asserted: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false")
+    )
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

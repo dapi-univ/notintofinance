@@ -7,8 +7,13 @@ import type { HistoryResponse } from "@/lib/api/types";
 import type { ChartType, Timeframe } from "@/lib/chart/adapter";
 import { dataStatusLabel } from "@/lib/market/freshness";
 import type { IndicatorId } from "@/lib/indicators/registry";
+import { useBrokerAccumulation } from "@/lib/api/queries";
 
 import { ChartState } from "@/components/states/chart-state";
+import {
+  BrokerAccumulationPanel,
+  type BrokerRange,
+} from "./broker-accumulation-panel";
 import { ChartToolbar } from "./chart-toolbar";
 import { MarketChart } from "./market-chart";
 import { SymbolHeader } from "./symbol-header";
@@ -30,8 +35,24 @@ export function ChartWorkspace({ ticker, history, loading, fetching, error, onRe
     () => new Set<IndicatorId>(["volume"]),
   );
   const [chartType, setChartType] = useState<ChartType>("candlestick");
+  const [brokerRange, setBrokerRange] = useState<BrokerRange>(20);
   const validHistory = history?.ticker === ticker ? history : undefined;
   const hasData = Boolean(validHistory?.bars.length);
+  const brokerEnabled = enabledIndicators.has("broker-accumulation");
+  const brokerDates = useMemo(() => {
+    const bars = validHistory?.bars ?? [];
+    const selected = bars.slice(-brokerRange);
+    return {
+      from: selected[0]?.date,
+      to: selected.at(-1)?.date,
+    };
+  }, [brokerRange, validHistory?.bars]);
+  const broker = useBrokerAccumulation(
+    ticker,
+    brokerDates.from,
+    brokerDates.to,
+    brokerEnabled,
+  );
   const toggleIndicator = (id: IndicatorId) => {
     if (id === "volume") return;
     setEnabledIndicators((current) => {
@@ -65,17 +86,29 @@ export function ChartWorkspace({ ticker, history, loading, fetching, error, onRe
           <span className="data-freshness__date">AS OF {status?.latest_trade_date ?? "NO TRADE DATE"}</span>
         </div>
       </div>
-      <section className="chart-stage" aria-label={`${ticker} synchronized price and indicator chart`}>
-        {loading ? <ChartState kind="loading" /> : null}
-        {error ? <ChartState kind="error" onRetry={onRetry} /> : null}
-        {!loading && !error && !hasData ? <ChartState kind="empty" /> : null}
-        {!loading && !error && hasData && validHistory ? (
-          <MarketChart ticker={ticker} bars={validHistory.bars} timeframe={timeframe} chartType={chartType} enabledIndicators={enabledIndicators} />
+      <div className={`workspace-market-area ${brokerEnabled ? "workspace-market-area--broker" : ""}`}>
+        <section className="chart-stage" aria-label={`${ticker} synchronized price and indicator chart`}>
+          {loading ? <ChartState kind="loading" /> : null}
+          {error ? <ChartState kind="error" onRetry={onRetry} /> : null}
+          {!loading && !error && !hasData ? <ChartState kind="empty" /> : null}
+          {!loading && !error && hasData && validHistory ? (
+            <MarketChart ticker={ticker} bars={validHistory.bars} timeframe={timeframe} chartType={chartType} enabledIndicators={enabledIndicators} />
+          ) : null}
+          {fetching && hasData ? (
+            <div className="chart-refresh" role="status"><RefreshCw aria-hidden="true" size={13} /> Updating {ticker}</div>
+          ) : null}
+        </section>
+        {brokerEnabled ? (
+          <BrokerAccumulationPanel
+            data={broker.data?.ticker === ticker ? broker.data : undefined}
+            loading={broker.isLoading || broker.data?.ticker !== ticker}
+            error={broker.isError}
+            range={brokerRange}
+            onRange={setBrokerRange}
+            onRetry={() => void broker.refetch()}
+          />
         ) : null}
-        {fetching && hasData ? (
-          <div className="chart-refresh" role="status"><RefreshCw aria-hidden="true" size={13} /> Updating {ticker}</div>
-        ) : null}
-      </section>
+      </div>
       <footer className="workspace-footer">
         <span>Source: {validHistory?.source?.toUpperCase() ?? "—"}</span>
         <span>Volume stored in shares · Lots = shares / 100</span>

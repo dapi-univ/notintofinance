@@ -28,10 +28,16 @@ The authoritative schema is the SQL migration under `supabase/migrations`.
   normalized source, normalization status and expiry.
 - `broker_flow_daily` stores one typed buy/sell row per ranked broker and date range. Pluang
   rows have `source_scope='top_n'` and `source_top_n=10`; they are not complete-market flow.
+- `broker_directory` is the provider-neutral master used to enrich broker-flow reads. It retains
+  provider names/classifications and separate Zapi-gateway/Pluang-source timestamps.
 - `tradebook_aggregates` stores the provider's daily price/time aggregate buckets. Missing
   views remain missing; no bucket is synthesized.
+- `tradebook_collection_sessions` records PRICE/TIME/VOLUME availability and the fail-closed
+  EOD session binding even when a component is empty.
 - `trade_prints` stores executed prints uniquely by stock, provider, session and provider
   sequence. One lot is converted deterministically to 100 shares. No broker field exists.
+  Gateway observation time, binding method and the provider-date assertion flag stay separate;
+  the current provider does not assert a session date.
 - `orderbook_snapshots` and `orderbook_levels` separate observed snapshot metadata from
   resting bid/ask liquidity. They are not executed volume.
 - `data_quality_events` classifies retryability and terminal failures with sanitized context.
