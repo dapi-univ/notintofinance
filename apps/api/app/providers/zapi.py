@@ -73,9 +73,10 @@ def _decimal(value: object) -> Decimal:
 
 
 def map_zapi_history(payload: dict[str, object]) -> ProviderHistory:
-    code = str(payload.get("code", "")).upper()
-    name = str(payload.get("name", code))
-    items = payload.get("items", [])
+    history = _unwrap_zapi_history(payload)
+    code = str(history.get("code", "")).upper()
+    name = str(history.get("name", code))
+    items = history.get("items", [])
     if not isinstance(items, list):
         raise ValueError("Zapi history items must be a list")
     bars = [
@@ -97,6 +98,18 @@ def map_zapi_history(payload: dict[str, object]) -> ProviderHistory:
         if isinstance(item, dict)
     ]
     return ProviderHistory(stock=StockIdentity(ticker=code, company_name=name), bars=bars)
+
+
+def _unwrap_zapi_history(payload: dict[str, object]) -> dict[str, object]:
+    if "data" not in payload:
+        return payload
+    history = payload["data"]
+    if not isinstance(history, dict):
+        raise ValueError("Zapi stock-history data must be an object")
+    unit = history.get("unit")
+    if unit is not None and unit != "shares":
+        raise ValueError("Zapi stock-history unit must be shares")
+    return history
 
 
 def map_zapi_summary_row(item: dict[str, object]) -> ProviderHistory:

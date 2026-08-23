@@ -1,9 +1,11 @@
 from decimal import Decimal
 
+import pytest
+
 from app.providers.zapi import map_zapi_history, map_zapi_summary_row
 
 
-def test_zapi_history_mapping_preserves_share_units() -> None:
+def test_zapi_history_mapping_supports_direct_response_and_preserves_share_units() -> None:
     result = map_zapi_history(
         {
             "code": "BBCA",
@@ -28,6 +30,44 @@ def test_zapi_history_mapping_preserves_share_units() -> None:
     assert result.stock.ticker == "BBCA"
     assert result.bars[0].volume_shares == 25_000_000
     assert result.bars[0].close == Decimal("8150")
+
+
+def test_zapi_history_mapping_supports_wrapped_live_response() -> None:
+    result = map_zapi_history(
+        {
+            "data": {
+                "code": "ANTM",
+                "name": "Aneka Tambang Tbk.",
+                "unit": "shares",
+                "items": [
+                    {
+                        "date": "2026-08-21",
+                        "open": 3000,
+                        "high": 3200,
+                        "low": 2980,
+                        "close": 3150,
+                        "previous": 3020,
+                        "volume": 100_000_000,
+                        "value": 315_000_000_000,
+                        "frequency": 12_345,
+                        "foreignBuyShares": 20_000_000,
+                        "foreignSellShares": 18_000_000,
+                    }
+                ],
+            },
+            "project": "fixture-project",
+            "timestamp": "2026-08-21T17:00:00Z",
+        }
+    )
+
+    assert result.stock.ticker == "ANTM"
+    assert result.bars[0].volume_shares == 100_000_000
+    assert result.bars[0].foreign_buy_shares == 20_000_000
+
+
+def test_zapi_history_mapping_rejects_malformed_envelope() -> None:
+    with pytest.raises(ValueError, match="stock-history data must be an object"):
+        map_zapi_history({"data": [], "project": "fixture-project"})
 
 
 def test_zapi_summary_maps_non_regular_fields() -> None:
