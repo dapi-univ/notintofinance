@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist_Mono, Manrope } from "next/font/google";
+import { Manrope } from "next/font/google";
 
 import { QueryProvider } from "@/components/providers/query-provider";
 
@@ -10,11 +10,6 @@ const manrope = Manrope({
   variable: "--font-manrope",
 });
 
-const geistMono = Geist_Mono({
-  subsets: ["latin"],
-  variable: "--font-geist-mono",
-});
-
 export const metadata: Metadata = {
   title: "KEJORA · Equity Research Tools",
   description: "Premium end-of-day Indonesian equities research workspace.",
@@ -22,7 +17,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${manrope.variable} ${geistMono.variable}`}>
+    <html lang="en" className={manrope.variable}>
       <body>
         <QueryProvider>{children}</QueryProvider>
       </body>
