@@ -1,12 +1,10 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 
 import { ChartWorkspace } from "@/components/chart/chart-workspace";
 import { NavigationRail } from "@/components/shell/navigation-rail";
 import { WatchlistPanel } from "@/components/watchlist/watchlist-panel";
-import { fetchHistory } from "@/lib/api/client";
 import { useDataStatus, useHistory, useStocks } from "@/lib/api/queries";
 import type { Timeframe } from "@/lib/chart/adapter";
 
@@ -20,7 +18,6 @@ export function DashboardClient({ initialTicker }: { initialTicker: string }) {
   const [timeframe, setTimeframe] = useState<Timeframe>("6M");
   const [, startTransition] = useTransition();
   const shellRef = useRef<HTMLDivElement>(null);
-  const queryClient = useQueryClient();
   const stocks = useStocks();
   const history = useHistory(activeTicker, timeframe);
   const status = useDataStatus();
@@ -75,7 +72,6 @@ export function DashboardClient({ initialTicker }: { initialTicker: string }) {
             error={stocks.isError}
             onRetry={() => void stocks.refetch()}
             onSelect={selectTicker}
-            onPrefetch={(ticker) => void queryClient.prefetchQuery({ queryKey: ["history", ticker, timeframe], queryFn: ({ signal }) => fetchHistory(ticker, timeframe, signal), staleTime: 5 * 60 * 1000 })}
             onClose={() => setWatchlistCollapsed(true)}
           />
           <div

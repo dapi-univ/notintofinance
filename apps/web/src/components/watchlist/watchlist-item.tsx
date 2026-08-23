@@ -1,5 +1,7 @@
 "use client";
 
+import { memo, useCallback } from "react";
+
 import type { StockListItem } from "@/lib/api/types";
 import { formatPrice, formatSigned, marketDirection } from "@/lib/format/market";
 
@@ -9,19 +11,20 @@ type Props = {
   stock: StockListItem;
   selected: boolean;
   onSelect: (ticker: string) => void;
-  onPrefetch: (ticker: string) => void;
 };
 
-export function WatchlistItem({ stock, selected, onSelect, onPrefetch }: Props) {
+export const WatchlistItem = memo(function WatchlistItem({ stock, selected, onSelect }: Props) {
   const direction = marketDirection(stock.change);
   const available = stock.has_history;
+  const handleSelect = useCallback(() => {
+    onSelect(stock.ticker);
+  }, [onSelect, stock.ticker]);
+
   return (
     <button
       type="button"
       className={`watchlist-item ${selected ? "watchlist-item--selected" : ""}`}
-      onClick={() => onSelect(stock.ticker)}
-      onMouseEnter={() => available && onPrefetch(stock.ticker)}
-      onFocus={() => available && onPrefetch(stock.ticker)}
+      onClick={handleSelect}
       aria-pressed={selected}
       disabled={!available}
       title={available ? stock.company_name : "History ingestion pending"}
@@ -41,4 +44,4 @@ export function WatchlistItem({ stock, selected, onSelect, onPrefetch }: Props) 
       </span>
     </button>
   );
-}
+});

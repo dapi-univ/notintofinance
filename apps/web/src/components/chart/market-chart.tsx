@@ -12,6 +12,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { HistoryBar } from "@/lib/api/types";
 import { filterBarsByTimeframe, toCandles, toLine, type ChartType, type Timeframe } from "@/lib/chart/adapter";
 import { syncIndicatorSeries } from "@/lib/chart/indicator-series";
+import {
+  createChartResizeScheduler,
+  type ChartResizeScheduler,
+} from "@/lib/chart/resize-scheduler";
 import { resetTickerViewport } from "@/lib/chart/viewport";
 import {
   indicatorDefinitions,
@@ -63,6 +67,8 @@ export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicat
     volumeDown: "transparent",
   });
   const paneLabelRefs = useRef(new Map<"price" | IndicatorId, HTMLDivElement>());
+  const resizeSchedulerRef = useRef<ChartResizeScheduler | null>(null);
+  const paneObserverRef = useRef<ResizeObserver | null>(null);
   const previousTickerRef = useRef(ticker);
   const [ready, setReady] = useState(false);
   const filteredBars = useMemo(() => filterBarsByTimeframe(bars, timeframe), [bars, timeframe]);
@@ -70,10 +76,16 @@ export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicat
     () => indicatorDefinitions.filter((definition) => enabledIndicators.has(definition.id)),
     [enabledIndicators],
   );
+  const enabledDefinitionsRef = useRef(enabledDefinitions);
+
+  useEffect(() => {
+    enabledDefinitionsRef.current = enabledDefinitions;
+  }, [enabledDefinitions]);
 
   useEffect(() => {
     let disposed = false;
     let observer: ResizeObserver | null = null;
+    let paneObserver: ResizeObserver | null = null;
     const indicatorSeries = indicatorSeriesRef.current;
     async function initialize() {
       if (!containerRef.current) return;
@@ -153,16 +165,64 @@ export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicat
       lineRef.current = line;
       histogramDefinitionRef.current = HistogramSeries;
       lineDefinitionRef.current = LineSeries;
-      observer = new ResizeObserver(() => {
-        if (containerRef.current) chart.resize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+      const updatePaneLabels = () => {
+        const container = containerRef.current;
+        if (!container) return;
+        const containerTop = container.getBoundingClientRect().top;
+        const positions = chart.panes().flatMap((pane, index) => {
+          const labelId =
+            index === 0
+              ? "price"
+              : enabledDefinitionsRef.current[index - 1]?.id;
+          const paneElement = pane.getHTMLElement();
+          const label = labelId
+            ? paneLabelRefs.current.get(labelId)
+            : undefined;
+          return paneElement && label
+            ? [{ label, top: Math.round(paneElement.getBoundingClientRect().top - containerTop + 8) }]
+            : [];
+        });
+        for (const { label, top } of positions) {
+          const nextTop = `${top}px`;
+          if (label.style.top !== nextTop) label.style.top = nextTop;
+        }
+      };
+      const resizeScheduler = createChartResizeScheduler({
+        chart,
+        getAutoScaleSeries: () => [
+          candles,
+          line,
+          ...Array.from(indicatorSeries.values()).flatMap((group) =>
+            Array.from(group.values()),
+          ),
+        ],
+        updateLayout: updatePaneLabels,
+      });
+      resizeSchedulerRef.current = resizeScheduler;
+      observer = new ResizeObserver((entries) => {
+        const entry = entries.at(-1);
+        if (entry) {
+          resizeScheduler.scheduleResize(
+            entry.contentRect.width,
+            entry.contentRect.height,
+          );
+        }
       });
       observer.observe(containerRef.current);
+      paneObserver = new ResizeObserver(() => {
+        resizeScheduler.scheduleLayout();
+      });
+      paneObserverRef.current = paneObserver;
       setReady(true);
     }
     void initialize();
     return () => {
       disposed = true;
       observer?.disconnect();
+      paneObserver?.disconnect();
+      resizeSchedulerRef.current?.cancel();
+      resizeSchedulerRef.current = null;
+      paneObserverRef.current = null;
       chartRef.current?.remove();
       chartRef.current = null;
       candleRef.current = null;
@@ -255,6 +315,7 @@ export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicat
       if (enabledDefinitions.length === 1) {
         panes[0].setHeight(Math.round(height * 0.75));
         panes[1].setHeight(Math.round(height * 0.25));
+        resizeSchedulerRef.current?.scheduleLayout();
         return;
       }
       const priceRatio = enabledDefinitions.length === 2 ? 0.67 : 0.62;
@@ -268,6 +329,7 @@ export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicat
           Math.round((height * remaining) / analyticsCount),
         );
       }
+      resizeSchedulerRef.current?.scheduleLayout();
     });
     return () => cancelAnimationFrame(frame);
   }, [enabledDefinitions.length, ready]);
@@ -275,37 +337,16 @@ export function MarketChart({ ticker, bars, timeframe, chartType, enabledIndicat
   useEffect(() => {
     if (!ready) return;
 
-    let frame = 0;
-    let paneObserver: ResizeObserver | null = null;
-    const updatePaneLabels = () => {
-      const chart = chartRef.current;
-      const container = containerRef.current;
-      if (!chart || !container) return;
-      const containerTop = container.getBoundingClientRect().top;
+    const paneObserver = paneObserverRef.current;
+    paneObserver?.disconnect();
+    const paneElements = chartRef.current
+      ?.panes()
+      .map((pane) => pane.getHTMLElement())
+      .filter((element): element is HTMLElement => element !== null) ?? [];
+    paneElements.forEach((element) => paneObserver?.observe(element));
+    resizeSchedulerRef.current?.scheduleLayout();
 
-      chart.panes().forEach((pane, index) => {
-        const labelId = index === 0 ? "price" : enabledDefinitions[index - 1]?.id;
-        const paneElement = pane.getHTMLElement();
-        const label = labelId ? paneLabelRefs.current.get(labelId) : undefined;
-        if (!paneElement || !label) return;
-        label.style.top = `${Math.round(paneElement.getBoundingClientRect().top - containerTop + 8)}px`;
-      });
-    };
-
-    frame = requestAnimationFrame(() => {
-      const paneElements = chartRef.current
-        ?.panes()
-        .map((pane) => pane.getHTMLElement())
-        .filter((element): element is HTMLElement => element !== null) ?? [];
-      paneObserver = new ResizeObserver(updatePaneLabels);
-      paneElements.forEach((element) => paneObserver?.observe(element));
-      updatePaneLabels();
-    });
-
-    return () => {
-      cancelAnimationFrame(frame);
-      paneObserver?.disconnect();
-    };
+    return () => paneObserver?.disconnect();
   }, [enabledDefinitions, ready]);
 
   return (

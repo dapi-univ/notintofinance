@@ -10,7 +10,6 @@ describe("WatchlistItem", () => {
       <WatchlistItem
         selected={false}
         onSelect={onSelect}
-        onPrefetch={() => undefined}
         stock={{
           ticker: "ANTM",
           company_name: "Aneka Tambang Tbk.",
@@ -32,12 +31,10 @@ describe("WatchlistItem", () => {
 
   it("keeps partial-universe symbols visible but unavailable until history exists", () => {
     const onSelect = vi.fn();
-    const onPrefetch = vi.fn();
     render(
       <WatchlistItem
         selected={false}
         onSelect={onSelect}
-        onPrefetch={onPrefetch}
         stock={{
           ticker: "ZZZZ",
           company_name: "History Pending",
@@ -55,9 +52,7 @@ describe("WatchlistItem", () => {
 
     const button = screen.getByRole("button", { name: /ZZZZ/i });
     expect(button).toBeDisabled();
-    fireEvent.mouseEnter(button);
     fireEvent.click(button);
-    expect(onPrefetch).not.toHaveBeenCalled();
     expect(onSelect).not.toHaveBeenCalled();
   });
 });
