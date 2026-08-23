@@ -65,12 +65,37 @@ class RunningTradesPage(BaseModel):
     next_cursor: str | None
 
 
+class TradebookAggregateRecord(BaseModel):
+    ticker: str = Field(pattern=r"^[A-Z0-9]{1,12}$")
+    trade_date: date
+    view_type: str
+    bucket_key: str = Field(min_length=1)
+    price: Decimal | None = Field(default=None, gt=0)
+    time_bucket: str | None = None
+    buy_frequency: int | None = Field(default=None, ge=0)
+    buy_lots: int | None = Field(default=None, ge=0)
+    sell_frequency: int | None = Field(default=None, ge=0)
+    sell_lots: int | None = Field(default=None, ge=0)
+    pre_frequency: int | None = Field(default=None, ge=0)
+    pre_lots: int | None = Field(default=None, ge=0)
+    post_frequency: int | None = Field(default=None, ge=0)
+    post_lots: int | None = Field(default=None, ge=0)
+    total_frequency: int | None = Field(default=None, ge=0)
+    total_lots: int | None = Field(default=None, ge=0)
+    provider: str = "pluang"
+    source_scope: str = "provider_aggregate"
+
+
 class IngestionCursorState(BaseModel):
     instrument_key: str
     session_date: date | None
     cursor_value: str | None
     high_water_mark: str | None
     status: str
+    collection_filter: dict[str, object] = Field(default_factory=dict)
+    collection_floor_idr: Decimal | None = Field(default=None, ge=0)
+    rows_fetched: int = Field(default=0, ge=0)
+    rows_retained: int = Field(default=0, ge=0)
 
 
 class RawPayloadRecord(BaseModel):
@@ -85,3 +110,11 @@ class RawPayloadRecord(BaseModel):
     payload: dict[str, object]
     normalization_status: str
     normalization_error: str | None = None
+
+
+class MarketPriorityCandidate(BaseModel):
+    ticker: str = Field(pattern=r"^[A-Z0-9]{1,12}$")
+    latest_close: Decimal | None = Field(default=None, gt=0)
+    listed_shares: int | None = Field(default=None, ge=0)
+    value_idr: Decimal | None = Field(default=None, ge=0)
+    frequency: int | None = Field(default=None, ge=0)

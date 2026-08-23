@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+from datetime import date
 
 from app.core.config import get_settings
 from app.db.session import Database
@@ -61,10 +62,16 @@ async def _run(args: argparse.Namespace) -> None:
         settings, transport=transport, raw_payload_sink=stage_payload
     )
 
-    async def record_failure(ticker: str, reason: str, retryable: bool, terminal: bool) -> None:
+    async def record_failure(
+        ticker: str,
+        reason: str,
+        retryable: bool,
+        terminal: bool,
+        dataset: str,
+    ) -> None:
         await warehouse.record_quality_event(
             provider="zapi",
-            dataset="stock-history",
+            dataset=dataset,
             ticker=ticker,
             reason_code=reason,
             retryable=retryable,
@@ -86,6 +93,21 @@ async def _run(args: argparse.Namespace) -> None:
                     f"updated={sync.updated} deactivated={sync.deactivated}"
                 )
             if args.sync_universe_only:
+                return
+
+            if args.market_summary:
+                requested_date = date.fromisoformat(args.trade_date) if args.trade_date else None
+                if args.dry_run:
+                    print("dataset=stock-summary expected_requests=1 write=false")
+                    return
+                summary = await service.ingest_market_summary(trade_date=requested_date)
+                print(
+                    "stock-summary "
+                    f"date={summary.trade_date} received={summary.rows_received} "
+                    f"valid={summary.rows_valid} rejected={summary.rows_rejected} "
+                    f"inserted={summary.rows_inserted} updated={summary.rows_updated} "
+                    f"row_failures={summary.row_failures}"
+                )
                 return
 
             if args.resume:
@@ -138,6 +160,11 @@ def main() -> None:
     selection.add_argument("--resume-failed", action="store_true")
     selection.add_argument("--discover-only", action="store_true")
     selection.add_argument("--sync-universe-only", action="store_true")
+    selection.add_argument(
+        "--market-summary",
+        action="store_true",
+        help="ingest one market-wide stock-summary EOD snapshot",
+    )
     parser.add_argument(
         "--mode",
         choices=[mode.value for mode in IngestionMode],
@@ -145,6 +172,7 @@ def main() -> None:
     )
     parser.add_argument("--sessions", type=int, default=260)
     parser.add_argument("--revision-days", type=int, default=14)
+    parser.add_argument("--trade-date", help="stock-summary session in YYYY-MM-DD format")
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--max-symbols", type=int)
     parser.add_argument("--daily-budget", type=int)
@@ -168,6 +196,7 @@ def main() -> None:
         and not args.resume_failed
         and not args.discover_only
         and not args.sync_universe_only
+        and not args.market_summary
     ):
         parser.error("select tickers or an operational mode")
     asyncio.run(_run(args))

@@ -2,7 +2,13 @@ import math
 from datetime import date, timedelta
 from decimal import Decimal
 
-from app.schemas.domain import MarketBar, ProviderHistory, ProviderUniverse, StockIdentity
+from app.schemas.domain import (
+    MarketBar,
+    ProviderDailySummary,
+    ProviderHistory,
+    ProviderUniverse,
+    StockIdentity,
+)
 
 MOCK_STOCKS = (
     ("BBCA", "Bank Central Asia Tbk.", Decimal("8450")),
@@ -44,7 +50,7 @@ class MockMarketDataProvider:
 
     async def get_daily_market_summary(
         self, *, trade_date: date | None = None
-    ) -> list[ProviderHistory]:
+    ) -> ProviderDailySummary:
         histories = [await self.get_stock_history(row[0], limit=260) for row in MOCK_STOCKS]
         output: list[ProviderHistory] = []
         for history in histories:
@@ -53,7 +59,7 @@ class MockMarketDataProvider:
             ]
             if eligible:
                 output.append(ProviderHistory(stock=history.stock, bars=[eligible[-1]]))
-        return output
+        return ProviderDailySummary(histories=output, rows_received=len(output))
 
     async def get_stock_universe(self) -> ProviderUniverse:
         stocks = [

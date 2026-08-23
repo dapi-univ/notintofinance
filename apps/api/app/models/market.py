@@ -1,7 +1,17 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Numeric, Text, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Numeric,
+    Text,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -24,6 +34,15 @@ class Stock(Base):
 
 class DailyMarketData(Base):
     __tablename__ = "daily_market_data"
+    __table_args__ = (
+        CheckConstraint(
+            "(listed_shares is null or listed_shares >= 0) "
+            "and (tradeable_shares is null or tradeable_shares >= 0) "
+            "and (weight_for_index is null or weight_for_index >= 0) "
+            "and (index_individual is null or index_individual >= 0)",
+            name="daily_market_data_market_metadata_nonnegative",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     stock_id: Mapped[int] = mapped_column(
@@ -43,6 +62,10 @@ class DailyMarketData(Base):
     non_regular_volume_shares: Mapped[int | None] = mapped_column(BigInteger)
     non_regular_value_idr: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
     non_regular_frequency: Mapped[int | None] = mapped_column(BigInteger)
+    listed_shares: Mapped[int | None] = mapped_column(BigInteger)
+    tradeable_shares: Mapped[int | None] = mapped_column(BigInteger)
+    weight_for_index: Mapped[int | None] = mapped_column(BigInteger)
+    index_individual: Mapped[Decimal | None] = mapped_column(Numeric(24, 6))
     source: Mapped[str] = mapped_column(Text)
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

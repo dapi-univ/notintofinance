@@ -41,13 +41,30 @@ and is not substituted for per-stock flow.
 ## Running trades
 
 - Path: `GET /running-trades`
-- Parameters: `code`; continuation uses `cursor=<opaque nextCursor>`.
+- Parameters: `code`; optional `minLot`, `action=BUY|SELL`; continuation uses the opaque
+  `cursor=<nextCursor>` unchanged.
 - Data: `items[]`, `nextCursor`, `count`, `source`, and optional `stockId`.
 - Item fields: `sequence`, Jakarta `time`, `price`, `lots`, and BUY/SELL `action`.
 - Contract: executed prints without broker identity.
 - Uniqueness: canonical stock, provider, session date and provider sequence.
 - Cursor state: an active worker uses `running`; a page-capped exit retaining `nextCursor`
-  uses `partial`.
+  uses `partial`. Only observed cursor exhaustion is `complete` for the declared filter.
+- Collection floor: a requested IDR floor is translated with
+  `ceil(min_trade_value_idr / (reference_price * 100))`. This is a storage/collection filter,
+  not an analytical Big Money threshold.
+
+## Tradebook aggregates
+
+- Path: `GET /tradebook`
+- Parameters: canonical `code` and `tab=ALL|PRICE|TIME|VOLUME`.
+- Data: normalized `byPrice`, `byTime`, and `byVolume` aggregate arrays, plus `items`.
+- Observed price fields: `price`, buy/sell/pre/post/total frequency and lots.
+- Observed time fields: `time`, buy lots and sell lots.
+- Live bounded sample: `ALL` returned price and time views while `byVolume` was empty;
+  a separate `VOLUME` request was also empty. Empty provider views are retained as absence,
+  and a non-empty unvalidated volume shape is rejected instead of guessed.
+- Contract: efficient daily structural aggregates. It can support price-level/directional
+  research, but cannot replace running-trade sequencing or print-size distributions.
 
 ## Orderbook
 
@@ -58,10 +75,11 @@ and is not substituted for per-stock flow.
 - Observation time: the outer Zapi envelope timestamp.
 - Contract: resting liquidity that may be cancelled; it is never labelled executed volume.
 
-## Reserved later endpoint
+## Collection separation
 
-`GET /tradebook` is documented but intentionally not ingested in Phase 1.1. It is reserved for
-the later Frequency Analyzer research phase after audit approval.
+Broker daily, tradebook, filtered running trades, and orderbook are independent operations.
+The three-dataset canary remains available only for bounded comparisons. Orderbook stays
+separately scheduled and is not approved for market-wide collection.
 
 ## Quota and retry contract
 

@@ -10,6 +10,7 @@ from app.providers.pluang import (
     map_pluang_broker_summary,
     map_pluang_orderbook,
     map_pluang_running_trades,
+    map_pluang_tradebook,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -43,6 +44,21 @@ def test_running_trades_maps_sequence_action_lots_and_next_cursor() -> None:
     assert page.records[0].shares == 2900
     assert page.records[0].executed_at.utcoffset().total_seconds() == 7 * 3600
     assert page.records[0].aggressor_action == "SELL"
+
+
+def test_tradebook_normalizes_observed_price_and_time_views() -> None:
+    rows = map_pluang_tradebook(
+        _fixture("pluang_tradebook.json"), "BBCA", date(2026, 8, 21)
+    )
+
+    assert [(row.view_type, row.bucket_key) for row in rows] == [
+        ("price", "6450"),
+        ("time", "09:00:00"),
+    ]
+    assert rows[0].buy_frequency == 20
+    assert rows[0].total_lots == 565
+    assert rows[1].buy_lots == 150
+    assert rows[1].sell_lots == 120
 
 
 def test_running_trades_rejects_duplicate_provider_sequences() -> None:
@@ -113,6 +129,7 @@ async def test_every_finance_pluang_endpoint_uses_the_server_zapi_key() -> None:
         _fixture("pluang_mapping.json"),
         _fixture("pluang_broker_summary.json"),
         _fixture("pluang_running_trades.json"),
+        _fixture("pluang_tradebook.json"),
         _fixture("pluang_orderbook.json"),
     ]
     provider = PluangProvider("fixture-key", ZAPI_BASE_URL, transport)
@@ -120,11 +137,12 @@ async def test_every_finance_pluang_endpoint_uses_the_server_zapi_key() -> None:
     await provider.resolve_instrument("BBCA")
     await provider.get_broker_summary("BBCA", date(2026, 8, 21))
     await provider.get_running_trades("BBCA", date(2026, 8, 21))
+    await provider.get_tradebook("BBCA", date(2026, 8, 21))
     await provider.get_orderbook("BBCA")
 
     assert provider.name == "pluang"
     assert provider.gateway == "zapi"
-    assert transport.get_json.await_count == 4
+    assert transport.get_json.await_count == 5
     for request in transport.get_json.await_args_list:
         assert request.kwargs["headers"] == {"x-api-key": "fixture-key"}
         assert request.kwargs["url"].startswith(ZAPI_BASE_URL)
@@ -138,6 +156,27 @@ async def test_canonical_ticker_orderbook_call_needs_no_mapping() -> None:
     await provider.get_orderbook("bbca")
 
     assert transport.get_json.await_args.kwargs["params"] == {"code": "BBCA"}
+
+
+async def test_running_trade_filters_are_forwarded_with_opaque_cursor() -> None:
+    transport = AsyncMock()
+    transport.get_json.return_value = _fixture("pluang_running_trades.json")
+    provider = PluangProvider("fixture-key", ZAPI_BASE_URL, transport)
+
+    await provider.get_running_trades(
+        "BBCA",
+        date(2026, 8, 21),
+        cursor="opaque-cursor",
+        min_lot=25,
+        action="sell",
+    )
+
+    assert transport.get_json.await_args.kwargs["params"] == {
+        "code": "BBCA",
+        "cursor": "opaque-cursor",
+        "minLot": 25,
+        "action": "SELL",
+    }
 
 
 async def test_raw_staging_identifies_zapi_gateway_and_pluang_source() -> None:

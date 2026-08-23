@@ -137,6 +137,7 @@ class CoverageResponse(BaseModel):
     stocks_with_eod_history: int
     pluang_mapped_stocks: int
     broker_flow_rows: int
+    tradebook_aggregate_rows: int
     trade_print_rows: int
     orderbook_snapshots: int
 

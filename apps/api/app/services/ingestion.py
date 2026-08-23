@@ -89,6 +89,17 @@ class BatchIngestionResult:
         return sum(result.status == "failed" for result in self.results)
 
 
+@dataclass(frozen=True)
+class MarketSummaryIngestionResult:
+    trade_date: date | None
+    rows_received: int
+    rows_valid: int
+    rows_rejected: int
+    rows_inserted: int
+    rows_updated: int
+    row_failures: int
+
+
 class EodBatchIngestionService:
     dataset = "stock-history"
 
@@ -97,7 +108,7 @@ class EodBatchIngestionService:
         provider: MarketDataProvider,
         repository: MarketRepository,
         *,
-        failure_recorder: Callable[[str, str, bool, bool], Awaitable[None]] | None = None,
+        failure_recorder: Callable[[str, str, bool, bool, str], Awaitable[None]] | None = None,
     ):
         self._provider = provider
         self._repository = repository
@@ -111,6 +122,97 @@ class EodBatchIngestionService:
             universe.stocks, deactivate_missing=True
         )
         return UniverseSyncResult(universe.total, inserted, updated, deactivated)
+
+    async def ingest_market_summary(
+        self, *, trade_date: date | None = None
+    ) -> MarketSummaryIngestionResult:
+        """Persist a market-wide EOD response without coupling valid rows."""
+        run_id = await self._repository.start_ingestion(self._provider.name, trade_date)
+        try:
+            summary = await self._provider.get_daily_market_summary(trade_date=trade_date)
+        except Exception as error:
+            await self._repository.finish_ingestion(
+                run_id,
+                status="failed",
+                rows_received=0,
+                rows_inserted=0,
+                rows_updated=0,
+                error_message=str(error)[:1000],
+            )
+            raise
+        inserted = 0
+        updated = 0
+        row_failures = 0
+        latest_date = trade_date
+        failure_messages: list[str] = []
+        for rejection in summary.rejections:
+            if rejection.ticker and self._failure_recorder:
+                with suppress(LookupError, RuntimeError):
+                    await self._failure_recorder(
+                        rejection.ticker,
+                        "stock_summary_validation_failure",
+                        False,
+                        True,
+                        "stock-summary",
+                    )
+        for history in summary.histories:
+            ticker = history.stock.ticker
+            try:
+                row_inserted, row_updated = await self._repository.upsert_history(
+                    history.stock, history.bars
+                )
+                inserted += row_inserted
+                updated += row_updated
+                row_date = max((bar.trade_date for bar in history.bars), default=None)
+                latest_date = max(
+                    (candidate for candidate in (latest_date, row_date) if candidate),
+                    default=None,
+                )
+                await self._repository.update_checkpoint(
+                    ticker,
+                    provider=self._provider.name,
+                    dataset="stock-summary",
+                    status="succeeded",
+                    last_successful_trade_date=row_date,
+                )
+            except Exception as error:
+                row_failures += 1
+                message = str(error)[:500]
+                failure_messages.append(f"{ticker}: {message}")
+                if self._failure_recorder:
+                    with suppress(LookupError, RuntimeError):
+                        await self._failure_recorder(
+                            ticker,
+                            "stock_summary_row_failure",
+                            True,
+                            False,
+                            "stock-summary",
+                        )
+                with suppress(LookupError, RuntimeError):
+                    await self._repository.update_checkpoint(
+                        ticker,
+                        provider=self._provider.name,
+                        dataset="stock-summary",
+                        status="failed",
+                        error_message=message,
+                    )
+        await self._repository.finish_ingestion(
+            run_id,
+            status="failed" if row_failures else "succeeded",
+            rows_received=summary.rows_received,
+            rows_inserted=inserted,
+            rows_updated=updated,
+            error_message="; ".join(failure_messages)[:1000] or None,
+        )
+        return MarketSummaryIngestionResult(
+            trade_date=latest_date,
+            rows_received=summary.rows_received,
+            rows_valid=len(summary.histories),
+            rows_rejected=len(summary.rejections),
+            rows_inserted=inserted,
+            rows_updated=updated,
+            row_failures=row_failures,
+        )
 
     async def failed_tickers(self) -> list[str]:
         return await self._repository.checkpoint_tickers(
@@ -243,7 +345,9 @@ class EodBatchIngestionService:
             reason, retryable, terminal = _classify_eod_error(error)
             if self._failure_recorder:
                 with suppress(LookupError, RuntimeError):
-                    await self._failure_recorder(ticker, reason, retryable, terminal)
+                    await self._failure_recorder(
+                        ticker, reason, retryable, terminal, self.dataset
+                    )
             with suppress(LookupError, RuntimeError):
                 await self._repository.update_checkpoint(
                     ticker,
@@ -274,7 +378,7 @@ def _classify_eod_error(error: Exception) -> tuple[str, bool, bool]:
 async def seed_mock_repository(provider: MarketDataProvider, repository: MarketRepository) -> None:
     summary = await provider.get_daily_market_summary()
     rows_received = 0
-    for item in summary:
+    for item in summary.histories:
         history = await provider.get_stock_history(item.stock.ticker, limit=260)
         rows_received += len(history.bars)
         await repository.upsert_history(history.stock, history.bars)

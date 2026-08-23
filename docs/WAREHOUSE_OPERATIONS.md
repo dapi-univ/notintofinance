@@ -11,6 +11,18 @@ uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
 
 ## Zapi EOD
 
+Ingest one ordinary market-wide EOD session (one provider request):
+
+```powershell
+uv run --project apps/api python -m app.cli --market-summary --trade-date 2026-08-21 --skip-universe-sync --request-cap 1
+```
+
+Dry-run that path without a provider call or write:
+
+```powershell
+uv run --project apps/api python -m app.cli --market-summary --skip-universe-sync --dry-run
+```
+
 Dry-run the pending-first selection:
 
 ```powershell
@@ -55,6 +67,33 @@ only its matching unresolved comparison event. Ordinary bounded runs resume the 
 `running`. An unresolved terminal comparison event blocks only its affected dataset during
 ordinary runs; use `--compare-existing` to perform a bounded re-check after review. Do not
 increase the three-symbol, three-page or 30-request Phase 1 boundary before audit approval.
+
+## Independent collection paths
+
+Calculate the full eligible universe and request economics without calling Zapi or writing
+normalized facts:
+
+```powershell
+uv run --project apps/api python -m app.warehouse_cli dry-run
+```
+
+Collect broker and tradebook observations independently:
+
+```powershell
+uv run --project apps/api python -m app.warehouse_cli broker BBCA --trade-date 2026-08-21 --request-cap 1
+uv run --project apps/api python -m app.warehouse_cli tradebook BBCA --trade-date 2026-08-21 --request-cap 1
+```
+
+Start or resume a filtered execution tape. The same session must retain the same floor and
+action filter; changing either is blocked instead of mixing incompatible samples:
+
+```powershell
+uv run --project apps/api python -m app.warehouse_cli running BBCA --trade-date 2026-08-21 --min-trade-value-idr 10000000 --max-pages 3 --request-cap 3
+```
+
+`complete` means the provider cursor was exhausted. `partial` preserves the opaque cursor,
+filter, floor, fetched/retained counts, and high-water value for a safe resume. No permanent
+production floor has been approved by the current evidence.
 
 ## Test database safety
 

@@ -254,3 +254,57 @@ async def test_zapi_rejected_history_is_sent_to_sanitized_raw_staging() -> None:
     assert sink.await_args.args[0] == "stock-history"
     assert sink.await_args.args[1] == "LMSH"
     assert sink.await_args.args[3] == "rejected"
+
+
+async def test_stock_summary_isolates_invalid_rows_and_preserves_valid_rows() -> None:
+    valid = {
+        "Date": "2026-08-21T00:00:00",
+        "StockCode": "BBCA",
+        "StockName": "Bank Central Asia Tbk.",
+        "OpenPrice": 6400,
+        "High": 6500,
+        "Low": 6375,
+        "Close": 6450,
+        "Previous": 6400,
+        "Volume": 1000,
+        "Value": 6450000,
+        "Frequency": 50,
+        "ForeignBuy": 300,
+        "ForeignSell": 200,
+        "NonRegularVolume": 10,
+        "NonRegularValue": 64500,
+        "NonRegularFrequency": 1,
+        "ListedShares": 1000000,
+        "TradebleShares": 900000,
+        "WeightForIndex": 800000,
+        "IndexIndividual": 12.5,
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "project": "finance:idx",
+                "timestamp": "2026-08-21T17:00:00Z",
+                "data": {
+                    "dataset": "stock-summary",
+                    "data": [valid, {**valid, "StockCode": "BAD", "Close": 0}],
+                },
+            },
+        )
+
+    sink = AsyncMock()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = ZapiProvider(
+            "fixture-key", "https://provider.invalid", client, raw_payload_sink=sink
+        )
+        summary = await provider.get_daily_market_summary()
+
+    assert summary.rows_received == 2
+    assert [item.stock.ticker for item in summary.histories] == ["BBCA"]
+    assert summary.histories[0].bars[0].non_regular_volume_shares == 10
+    assert summary.histories[0].bars[0].listed_shares == 1_000_000
+    assert summary.rejections[0].ticker == "BAD"
+    assert sink.await_args.args[3] == "normalized"
+    assert sink.await_args.args[4] == "rejected 1 invalid rows"

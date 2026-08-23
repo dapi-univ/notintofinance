@@ -1,7 +1,22 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, Text, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    Integer,
+    Numeric,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -93,6 +108,79 @@ class BrokerFlowDaily(Base):
     )
 
 
+class TradebookAggregate(Base):
+    __tablename__ = "tradebook_aggregates"
+    __table_args__ = (
+        UniqueConstraint(
+            "stock_id",
+            "provider",
+            "trade_date",
+            "view_type",
+            "bucket_key",
+            name="tradebook_aggregates_identity_key",
+        ),
+        CheckConstraint(
+            "view_type in ('price', 'time', 'volume')",
+            name="tradebook_aggregates_view_check",
+        ),
+        CheckConstraint(
+            "length(btrim(bucket_key)) > 0",
+            name="tradebook_aggregates_bucket_not_blank",
+        ),
+        CheckConstraint(
+            "price is null or price > 0",
+            name="tradebook_aggregates_price_positive",
+        ),
+        CheckConstraint(
+            "(buy_frequency is null or buy_frequency >= 0) "
+            "and (buy_lots is null or buy_lots >= 0) "
+            "and (sell_frequency is null or sell_frequency >= 0) "
+            "and (sell_lots is null or sell_lots >= 0) "
+            "and (pre_frequency is null or pre_frequency >= 0) "
+            "and (pre_lots is null or pre_lots >= 0) "
+            "and (post_frequency is null or post_frequency >= 0) "
+            "and (post_lots is null or post_lots >= 0) "
+            "and (total_frequency is null or total_frequency >= 0) "
+            "and (total_lots is null or total_lots >= 0)",
+            name="tradebook_aggregates_values_nonnegative",
+        ),
+        CheckConstraint(
+            "source_scope = 'provider_aggregate'",
+            name="tradebook_aggregates_scope_check",
+        ),
+        Index(
+            "tradebook_aggregates_stock_date_idx",
+            "stock_id",
+            text("trade_date desc"),
+            "view_type",
+            "bucket_key",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    stock_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stocks.id", ondelete="CASCADE"))
+    provider: Mapped[str] = mapped_column(Text)
+    trade_date: Mapped[date] = mapped_column(Date)
+    view_type: Mapped[str] = mapped_column(Text)
+    bucket_key: Mapped[str] = mapped_column(Text)
+    price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    time_bucket: Mapped[str | None] = mapped_column(Text)
+    buy_frequency: Mapped[int | None] = mapped_column(BigInteger)
+    buy_lots: Mapped[int | None] = mapped_column(BigInteger)
+    sell_frequency: Mapped[int | None] = mapped_column(BigInteger)
+    sell_lots: Mapped[int | None] = mapped_column(BigInteger)
+    pre_frequency: Mapped[int | None] = mapped_column(BigInteger)
+    pre_lots: Mapped[int | None] = mapped_column(BigInteger)
+    post_frequency: Mapped[int | None] = mapped_column(BigInteger)
+    post_lots: Mapped[int | None] = mapped_column(BigInteger)
+    total_frequency: Mapped[int | None] = mapped_column(BigInteger)
+    total_lots: Mapped[int | None] = mapped_column(BigInteger)
+    source_scope: Mapped[str] = mapped_column(Text)
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class TradePrint(Base):
     __tablename__ = "trade_prints"
 
@@ -157,6 +245,29 @@ class DataQualityEvent(Base):
 
 class IngestionCursor(Base):
     __tablename__ = "ingestion_cursors"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "dataset",
+            "instrument_key",
+            "session_date",
+            name="ingestion_cursors_identity_key",
+            postgresql_nulls_not_distinct=True,
+        ),
+        CheckConstraint(
+            "status in ('pending', 'running', 'partial', 'succeeded', 'failed', "
+            "'exhausted', 'complete', 'blocked')",
+            name="ingestion_cursors_status_check",
+        ),
+        CheckConstraint(
+            "rows_fetched >= 0 and rows_retained >= 0 and rows_retained <= rows_fetched",
+            name="ingestion_cursors_collection_counts_check",
+        ),
+        CheckConstraint(
+            "collection_floor_idr is null or collection_floor_idr >= 0",
+            name="ingestion_cursors_collection_floor_check",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     provider: Mapped[str] = mapped_column(Text)
@@ -172,4 +283,10 @@ class IngestionCursor(Base):
     attempt_count: Mapped[int] = mapped_column(Integer)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_message: Mapped[str | None] = mapped_column(Text)
+    collection_filter: Mapped[dict[str, object]] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
+    collection_floor_idr: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    rows_fetched: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    rows_retained: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

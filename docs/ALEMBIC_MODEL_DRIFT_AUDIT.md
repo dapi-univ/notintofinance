@@ -1,9 +1,9 @@
 # Alembic Model Drift Audit
 
-Audited against the live PostgreSQL schema at Alembic head `20260823084324` on
+Audited against the live PostgreSQL schema at Alembic head `20260823133000` on
 2026-08-23. No migration was generated or applied for this audit.
 
-`alembic check` reports 84 operations. These are metadata-representation drift: the live
+`alembic check` reports 82 operations. These are metadata-representation drift: the live
 database contains migration-defined constraints, indexes, and comments that are not declared
 in SQLAlchemy `Base.metadata`. There is no missing live column, type mismatch, nullability
 mismatch, or unapplied revision. Applying the generated removal operations would weaken the
@@ -11,8 +11,8 @@ schema and is not safe.
 
 ## Classification
 
-- 53 `remove_constraint` operations are live check constraints omitted from ORM metadata.
-- 10 `remove_constraint` operations are live unique constraints omitted from ORM metadata.
+- 52 `remove_constraint` operations are live check constraints omitted from ORM metadata.
+- 9 `remove_constraint` operations are live unique constraints omitted from ORM metadata.
 - 16 `remove_index` operations are live named indexes omitted from ORM metadata.
 - 3 `add_index` operations come from ORM `index=True` declarations whose generated `ix_*`
   identities do not match the deliberate migration-defined index or unique-constraint shape.
@@ -24,7 +24,7 @@ items because `compare_server_default` is not enabled.
 
 ## Exact standard-check items
 
-### Check constraints present live but absent from ORM metadata (53)
+### Check constraints present live but absent from ORM metadata (52)
 
 - `broker_flow_daily`: `broker_flow_daily_date_range_check`,
   `broker_flow_daily_numbers_nonnegative`, `broker_flow_daily_rank_positive`,
@@ -41,8 +41,7 @@ items because `compare_server_default` is not enabled.
   `data_quality_events_severity_check`.
 - `ingestion_checkpoints`: `ingestion_checkpoints_dataset_not_blank`,
   `ingestion_checkpoints_provider_not_blank`, `ingestion_checkpoints_status_check`.
-- `ingestion_cursors`: `ingestion_cursors_attempt_positive`,
-  `ingestion_cursors_status_check`.
+- `ingestion_cursors`: `ingestion_cursors_attempt_positive`.
 - `ingestion_runs`: `ingestion_runs_counts_nonnegative`,
   `ingestion_runs_finished_after_started`, `ingestion_runs_provider_not_blank`,
   `ingestion_runs_status_valid`.
@@ -65,12 +64,11 @@ items because `compare_server_default` is not enabled.
 - `trade_prints`: `trade_prints_action_check`, `trade_prints_price_positive`,
   `trade_prints_share_conversion_check`, `trade_prints_volume_nonnegative`.
 
-### Unique constraints present live but absent from ORM metadata (10)
+### Unique constraints present live but absent from ORM metadata (9)
 
 - `broker_flow_daily_identity_key`
 - `daily_market_data_stock_date_key`
 - `ingestion_checkpoints_identity_key`
-- `ingestion_cursors_identity_key`
 - `instrument_provider_mappings_stock_provider_key`
 - `orderbook_levels_identity_key`
 - `orderbook_snapshots_identity_key`
@@ -129,3 +127,10 @@ composite indexes or unique constraint covering the corresponding access path.
 Align SQLAlchemy metadata with the authoritative migration-defined schema, including names,
 comments, and server defaults, then rerun autogenerate comparison. This is a metadata cleanup;
 it must not be implemented by dropping the live protections or creating duplicate indexes.
+
+The Phase 1 data-sufficiency additions are represented in metadata: Alembic reports no
+operation for `tradebook_aggregates`, the four new EOD metadata columns or their constraint,
+the session-scoped cursor identity/status, or the collection filter/floor/count constraints.
+The operation count decreased by two because cursor identity and status metadata are now
+aligned. The remaining 82 pre-existing items retain the classifications above and must not
+be applied as generated removals.

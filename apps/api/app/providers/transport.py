@@ -289,6 +289,14 @@ def _infer_rows(payload: dict[str, object] | None) -> int | None:
     body = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     if not isinstance(body, dict):
         return None
+    aggregate_views = [body.get(key) for key in ("byPrice", "byTime", "byVolume")]
+    if all(isinstance(candidate, list) for candidate in aggregate_views):
+        return sum(
+            len(candidate) for candidate in aggregate_views if isinstance(candidate, list)
+        )
+    book_sides = [body.get(key) for key in ("bids", "asks")]
+    if all(isinstance(candidate, list) for candidate in book_sides):
+        return sum(len(candidate) for candidate in book_sides if isinstance(candidate, list))
     for key in ("items", "data", "rt", "brokerSummary", "bids", "asks"):
         candidate = body.get(key)
         if isinstance(candidate, list):

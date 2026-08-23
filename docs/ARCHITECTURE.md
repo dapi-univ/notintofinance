@@ -36,6 +36,11 @@ bounded worker pool, recent-window refreshes, idempotent database upserts, and p
 checkpoints. One ticker failure is recorded without rolling back other completed symbols.
 Normal API reads do not instantiate or call the provider.
 
+Ordinary EOD collection uses one market-wide `stock-summary` response with independent row
+validation and upserts. `stock-history` remains the per-ticker backfill, reconciliation, and
+targeted-repair path. Broker daily, tradebook, filtered running trades, and orderbook are
+separate operations with their own cadence and quota economics.
+
 Every gateway attempt is fingerprinted without credentials and recorded with latency,
 status, attempt number, row count, cache status, and available quota headers. Both
 `finance:idx` and `finance:pluang` consume one shared Zapi budget initialized from the latest

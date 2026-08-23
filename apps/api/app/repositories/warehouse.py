@@ -3,6 +3,7 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy import and_, delete, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -19,6 +20,7 @@ from app.models.warehouse import (
     OrderbookSnapshot,
     ProviderRequestLedger,
     RawProviderPayload,
+    TradebookAggregate,
     TradePrint,
 )
 from app.providers.transport import ProviderRequestEvent
@@ -26,8 +28,10 @@ from app.schemas.warehouse import (
     BrokerFlowRecord,
     IngestionCursorState,
     InstrumentMappingRecord,
+    MarketPriorityCandidate,
     OrderbookSnapshotRecord,
     RawPayloadRecord,
+    TradebookAggregateRecord,
     TradePrintRecord,
 )
 
@@ -247,6 +251,69 @@ class PostgresWarehouseRepository:
         inserted = len(set(identities) - existing)
         return inserted, len(records) - inserted
 
+    async def upsert_tradebook(
+        self, records: list[TradebookAggregateRecord]
+    ) -> tuple[int, int]:
+        if not records:
+            return 0, 0
+        first = records[0]
+        if any(
+            (row.ticker, row.provider, row.trade_date)
+            != (first.ticker, first.provider, first.trade_date)
+            for row in records
+        ):
+            raise ValueError("tradebook upsert requires one ticker/provider/session")
+        async with self._database.session() as session, session.begin():
+            stock_id = await self._stock_id(session, first.ticker)
+            identities = [(row.view_type, row.bucket_key) for row in records]
+            existing = set(
+                (
+                    await session.execute(
+                        select(
+                            TradebookAggregate.view_type,
+                            TradebookAggregate.bucket_key,
+                        ).where(
+                            TradebookAggregate.stock_id == stock_id,
+                            TradebookAggregate.provider == first.provider,
+                            TradebookAggregate.trade_date == first.trade_date,
+                            tuple_(
+                                TradebookAggregate.view_type,
+                                TradebookAggregate.bucket_key,
+                            ).in_(identities),
+                        )
+                    )
+                ).all()
+            )
+            values = [
+                {"stock_id": stock_id, **row.model_dump(exclude={"ticker"})}
+                for row in records
+            ]
+            statement = pg_insert(TradebookAggregate).values(values)
+            excluded = statement.excluded
+            await session.execute(
+                statement.on_conflict_do_update(
+                    constraint="tradebook_aggregates_identity_key",
+                    set_={
+                        "price": excluded.price,
+                        "time_bucket": excluded.time_bucket,
+                        "buy_frequency": excluded.buy_frequency,
+                        "buy_lots": excluded.buy_lots,
+                        "sell_frequency": excluded.sell_frequency,
+                        "sell_lots": excluded.sell_lots,
+                        "pre_frequency": excluded.pre_frequency,
+                        "pre_lots": excluded.pre_lots,
+                        "post_frequency": excluded.post_frequency,
+                        "post_lots": excluded.post_lots,
+                        "total_frequency": excluded.total_frequency,
+                        "total_lots": excluded.total_lots,
+                        "source_scope": excluded.source_scope,
+                        "ingested_at": func.now(),
+                    },
+                )
+            )
+        inserted = len(set(identities) - existing)
+        return inserted, len(records) - inserted
+
     async def upsert_trade_prints(self, records: list[TradePrintRecord]) -> tuple[int, int]:
         if not records:
             return 0, 0
@@ -342,6 +409,10 @@ class PostgresWarehouseRepository:
         high_water_mark: str | None,
         status: str,
         error_message: str | None = None,
+        collection_filter: dict[str, object] | None = None,
+        collection_floor_idr: Decimal | None = None,
+        rows_fetched: int = 0,
+        rows_retained: int = 0,
     ) -> None:
         async with self._database.session() as session, session.begin():
             stock_id = await self._stock_id(session, ticker)
@@ -355,6 +426,10 @@ class PostgresWarehouseRepository:
                 high_water_mark=high_water_mark,
                 status=status,
                 error_message=(error_message or "")[:1000] or None,
+                collection_filter=_sanitize(collection_filter or {}),
+                collection_floor_idr=collection_floor_idr,
+                rows_fetched=rows_fetched,
+                rows_retained=rows_retained,
             )
             await session.execute(
                 statement.on_conflict_do_update(
@@ -367,6 +442,10 @@ class PostgresWarehouseRepository:
                         "status": statement.excluded.status,
                         "attempt_count": IngestionCursor.attempt_count + 1,
                         "error_message": statement.excluded.error_message,
+                        "collection_filter": statement.excluded.collection_filter,
+                        "collection_floor_idr": statement.excluded.collection_floor_idr,
+                        "rows_fetched": statement.excluded.rows_fetched,
+                        "rows_retained": statement.excluded.rows_retained,
                         "updated_at": func.now(),
                     },
                 )
@@ -399,7 +478,62 @@ class PostgresWarehouseRepository:
                 cursor_value=row.cursor_value,
                 high_water_mark=row.high_water_mark,
                 status=row.status,
+                collection_filter=row.collection_filter,
+                collection_floor_idr=row.collection_floor_idr,
+                rows_fetched=row.rows_fetched,
+                rows_retained=row.rows_retained,
             )
+
+    async def collection_candidates(
+        self, *, mapped_only: bool = True
+    ) -> list[MarketPriorityCandidate]:
+        latest_dates = (
+            select(
+                DailyMarketData.stock_id.label("stock_id"),
+                func.max(DailyMarketData.trade_date).label("trade_date"),
+            )
+            .group_by(DailyMarketData.stock_id)
+            .subquery()
+        )
+        async with self._database.session() as session:
+            statement = (
+                select(
+                    Stock.ticker,
+                    DailyMarketData.close,
+                    DailyMarketData.listed_shares,
+                    DailyMarketData.value_idr,
+                    DailyMarketData.frequency,
+                )
+                .outerjoin(latest_dates, latest_dates.c.stock_id == Stock.id)
+                .outerjoin(
+                    DailyMarketData,
+                    and_(
+                        DailyMarketData.stock_id == Stock.id,
+                        DailyMarketData.trade_date == latest_dates.c.trade_date,
+                    ),
+                )
+                .where(Stock.is_active)
+            )
+            if mapped_only:
+                statement = statement.join(
+                    InstrumentProviderMapping,
+                    and_(
+                        InstrumentProviderMapping.stock_id == Stock.id,
+                        InstrumentProviderMapping.provider == "pluang",
+                        InstrumentProviderMapping.mapping_status == "mapped",
+                    ),
+                )
+            rows = (await session.execute(statement.order_by(Stock.ticker))).all()
+            return [
+                MarketPriorityCandidate(
+                    ticker=row.ticker,
+                    latest_close=row.close,
+                    listed_shares=row.listed_shares,
+                    value_idr=row.value_idr,
+                    frequency=row.frequency,
+                )
+                for row in rows
+            ]
 
     async def record_quality_event(
         self,
@@ -599,6 +733,9 @@ class PostgresWarehouseRepository:
                 or 0
             )
             broker_count = int(await session.scalar(select(func.count(BrokerFlowDaily.id))) or 0)
+            tradebook_count = int(
+                await session.scalar(select(func.count(TradebookAggregate.id))) or 0
+            )
             trade_count = int(await session.scalar(select(func.count(TradePrint.id))) or 0)
             orderbook_count = int(
                 await session.scalar(select(func.count(OrderbookSnapshot.id))) or 0
@@ -608,6 +745,7 @@ class PostgresWarehouseRepository:
                 "stocks_with_eod_history": history_count,
                 "pluang_mapped_stocks": mapping_count,
                 "broker_flow_rows": broker_count,
+                "tradebook_aggregate_rows": tradebook_count,
                 "trade_print_rows": trade_count,
                 "orderbook_snapshots": orderbook_count,
             }

@@ -92,7 +92,15 @@ Verified against the public Zapi scraper catalog and authenticated live response
 ## Operational notes
 
 - Normal application reads are PostgreSQL-only. Zapi is invoked only by the ingestion CLI.
+- Ordinary daily updates use one market-wide `stock-summary` request. Rows are validated and
+  persisted independently, so one malformed/unsupported security does not roll back valid
+  market rows.
 - `daily_market_data` is upserted on `(stock_id, trade_date)` and never replaced wholesale.
+- `stock-summary` is also the canonical source for the separately stored non-regular fields
+  and observed listed/tradeable/index metadata. `WeightForIndex` and `IndexIndividual` are
+  not labelled official IHSG portfolio weights because that meaning is not confirmed.
+- `stock-history` remains the targeted backfill/reconciliation path and is not used for the
+  ordinary all-market daily update.
 - Provider failure leaves previously stored history readable.
 - Phase 1 enforces a 2,500-request monthly reserve, an 800-request default daily soft budget,
   and explicit run caps. Checkpoint-based resume remains mandatory even when the observed

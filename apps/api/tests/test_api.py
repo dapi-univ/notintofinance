@@ -42,6 +42,7 @@ class FakeWarehouseService:
             "stocks_with_eod_history": 439,
             "pluang_mapped_stocks": 3,
             "broker_flow_rows": 60,
+            "tradebook_aggregate_rows": 103,
             "trade_print_rows": 100,
             "orderbook_snapshots": 3,
         }

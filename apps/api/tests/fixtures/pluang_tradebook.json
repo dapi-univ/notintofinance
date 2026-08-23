@@ -1,0 +1,45 @@
+{
+  "project": "finance:pluang",
+  "timestamp": "2026-08-21T09:00:00.000Z",
+  "data": {
+    "code": "BBCA",
+    "stockId": 10020,
+    "tab": "ALL",
+    "count": 1,
+    "items": [
+      {
+        "price": 6450,
+        "buyFreq": 20,
+        "buyLots": 300,
+        "preFreq": 2,
+        "preLots": 10,
+        "postFreq": 1,
+        "postLots": 5,
+        "sellFreq": 18,
+        "sellLots": 250,
+        "totalFreq": 41,
+        "totalLots": 565
+      }
+    ],
+    "byPrice": [
+      {
+        "price": 6450,
+        "buyFreq": 20,
+        "buyLots": 300,
+        "preFreq": 2,
+        "preLots": 10,
+        "postFreq": 1,
+        "postLots": 5,
+        "sellFreq": 18,
+        "sellLots": 250,
+        "totalFreq": 41,
+        "totalLots": 565
+      }
+    ],
+    "byTime": [
+      {"time": "09:00", "buyLots": 150, "sellLots": 120}
+    ],
+    "byVolume": [],
+    "source": "pluang"
+  }
+}

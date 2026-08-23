@@ -12,6 +12,7 @@ from app.schemas.warehouse import (
     OrderbookSnapshotRecord,
     RawPayloadRecord,
     RunningTradesPage,
+    TradebookAggregateRecord,
     TradePrintRecord,
 )
 
@@ -92,11 +93,22 @@ class PluangProvider:
         trade_date: date,
         *,
         cursor: str | None = None,
+        min_lot: int | None = None,
+        action: str | None = None,
     ) -> tuple[RunningTradesPage, dict[str, object]]:
         code = _ticker(ticker)
-        params = {"code": code}
+        params: dict[str, str | int] = {"code": code}
         if cursor:
             params["cursor"] = cursor
+        if min_lot is not None:
+            if min_lot < 1:
+                raise ValueError("running-trades min_lot must be positive")
+            params["minLot"] = min_lot
+        if action is not None:
+            normalized_action = action.upper()
+            if normalized_action not in {"BUY", "SELL"}:
+                raise ValueError("running-trades action must be BUY or SELL")
+            params["action"] = normalized_action
         payload = await self._get("running-trades", params)
         raw = self._raw_record(
             "running-trades",
@@ -108,6 +120,27 @@ class PluangProvider:
         )
         try:
             result = map_pluang_running_trades(payload, code, trade_date)
+        except ValueError as error:
+            await self._stage(raw, "rejected", str(error))
+            raise
+        await self._stage(raw, "normalized", None)
+        return result, payload
+
+    async def get_tradebook(
+        self, ticker: str, trade_date: date, *, tab: str = "ALL"
+    ) -> tuple[list[TradebookAggregateRecord], dict[str, object]]:
+        code = _ticker(ticker)
+        normalized_tab = tab.upper()
+        if normalized_tab not in {"ALL", "PRICE", "TIME", "VOLUME"}:
+            raise ValueError("tradebook tab must be ALL, PRICE, TIME, or VOLUME")
+        payload = await self._get(
+            "tradebook", {"code": code, "tab": normalized_tab}
+        )
+        raw = self._raw_record(
+            "tradebook", code, payload, date_from=trade_date, date_to=trade_date
+        )
+        try:
+            result = map_pluang_tradebook(payload, code, trade_date)
         except ValueError as error:
             await self._stage(raw, "rejected", str(error))
             raise
@@ -129,7 +162,7 @@ class PluangProvider:
         return result, payload
 
     async def _get(
-        self, endpoint: str, params: dict[str, str]
+        self, endpoint: str, params: dict[str, str | int]
     ) -> dict[str, object]:
         endpoint_name = f"{ZAPI_PLUANG_NAMESPACE}/{endpoint}"
         return await self._transport.get_json(
@@ -256,6 +289,65 @@ def map_pluang_running_trades(
     return RunningTradesPage(records=records, next_cursor=next_cursor)
 
 
+def map_pluang_tradebook(
+    payload: dict[str, object], ticker: str, trade_date: date
+) -> list[TradebookAggregateRecord]:
+    code = _ticker(ticker)
+    body = _unwrap_zapi_pluang(payload, dataset="tradebook", ticker=code)
+    output: list[TradebookAggregateRecord] = []
+    price_rows = body.get("byPrice")
+    time_rows = body.get("byTime")
+    volume_rows = body.get("byVolume")
+    if not all(isinstance(rows, list) for rows in (price_rows, time_rows, volume_rows)):
+        raise ValueError("finance:pluang tradebook aggregate views must be lists")
+    assert isinstance(price_rows, list)
+    assert isinstance(time_rows, list)
+    assert isinstance(volume_rows, list)
+    for row in price_rows:
+        if not isinstance(row, dict):
+            raise ValueError("finance:pluang tradebook price row must be an object")
+        price = Decimal(str(row["price"]))
+        output.append(
+            TradebookAggregateRecord(
+                ticker=code,
+                trade_date=trade_date,
+                view_type="price",
+                bucket_key=str(price),
+                price=price,
+                buy_frequency=_optional_nonnegative_int(row.get("buyFreq")),
+                buy_lots=_optional_nonnegative_int(row.get("buyLots")),
+                sell_frequency=_optional_nonnegative_int(row.get("sellFreq")),
+                sell_lots=_optional_nonnegative_int(row.get("sellLots")),
+                pre_frequency=_optional_nonnegative_int(row.get("preFreq")),
+                pre_lots=_optional_nonnegative_int(row.get("preLots")),
+                post_frequency=_optional_nonnegative_int(row.get("postFreq")),
+                post_lots=_optional_nonnegative_int(row.get("postLots")),
+                total_frequency=_optional_nonnegative_int(row.get("totalFreq")),
+                total_lots=_optional_nonnegative_int(row.get("totalLots")),
+            )
+        )
+    for row in time_rows:
+        if not isinstance(row, dict):
+            raise ValueError("finance:pluang tradebook time row must be an object")
+        bucket = time.fromisoformat(str(row["time"])).strftime("%H:%M:%S")
+        output.append(
+            TradebookAggregateRecord(
+                ticker=code,
+                trade_date=trade_date,
+                view_type="time",
+                bucket_key=bucket,
+                time_bucket=bucket,
+                buy_lots=_optional_nonnegative_int(row.get("buyLots")),
+                sell_lots=_optional_nonnegative_int(row.get("sellLots")),
+            )
+        )
+    if volume_rows:
+        raise ValueError(
+            "finance:pluang tradebook byVolume contract is non-empty but not validated"
+        )
+    return output
+
+
 def map_pluang_orderbook(
     payload: dict[str, object], ticker: str
 ) -> OrderbookSnapshotRecord:
@@ -336,6 +428,15 @@ def _broker_side(
         source_scope=source_scope,
         source_top_n=source_top_n,
     )
+
+
+def _optional_nonnegative_int(value: object) -> int | None:
+    if value is None:
+        return None
+    parsed = int(str(value))
+    if parsed < 0:
+        raise ValueError("finance:pluang aggregate values must be non-negative")
+    return parsed
 
 
 def _ticker(value: str) -> str:

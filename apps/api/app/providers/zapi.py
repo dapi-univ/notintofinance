@@ -6,7 +6,14 @@ from decimal import Decimal
 import httpx
 
 from app.providers.transport import QuotaAwareTransport
-from app.schemas.domain import MarketBar, ProviderHistory, ProviderUniverse, StockIdentity
+from app.schemas.domain import (
+    MarketBar,
+    ProviderDailySummary,
+    ProviderHistory,
+    ProviderRowRejection,
+    ProviderUniverse,
+    StockIdentity,
+)
 
 TICKER_PATTERN = re.compile(r"^[A-Z0-9]{1,12}$")
 RawPayloadSink = Callable[
@@ -77,21 +84,44 @@ class ZapiProvider:
 
     async def get_daily_market_summary(
         self, *, trade_date: date | None = None
-    ) -> list[ProviderHistory]:
+    ) -> ProviderDailySummary:
         params: dict[str, str | int] = {"length": 1000, "start": 0}
         if trade_date:
             params["date"] = trade_date.isoformat()
         payload = await self._get("stock-summary", params)
         try:
             rows = _unwrap_rows(payload, dataset="stock-summary")
-            result = [map_zapi_summary_row(row) for row in rows if isinstance(row, dict)]
         except ValueError as error:
             await self._stage_payload(
                 "stock-summary", None, payload, "rejected", str(error)
             )
             raise
-        await self._stage_payload("stock-summary", None, payload, "normalized", None)
-        return result
+        result: list[ProviderHistory] = []
+        rejections: list[ProviderRowRejection] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                rejections.append(
+                    ProviderRowRejection(reason="stock-summary row must be an object")
+                )
+                continue
+            try:
+                result.append(map_zapi_summary_row(row))
+            except (KeyError, TypeError, ValueError) as error:
+                ticker = str(row.get("StockCode", "")).strip().upper() or None
+                rejections.append(
+                    ProviderRowRejection(ticker=ticker, reason=str(error)[:500])
+                )
+        if rows and not result:
+            message = "Zapi stock-summary contains no valid market rows"
+            await self._stage_payload("stock-summary", None, payload, "rejected", message)
+            raise ValueError(message)
+        warning = f"rejected {len(rejections)} invalid rows" if rejections else None
+        await self._stage_payload("stock-summary", None, payload, "normalized", warning)
+        return ProviderDailySummary(
+            histories=result,
+            rows_received=len(rows),
+            rejections=rejections,
+        )
 
     async def get_stock_universe(self) -> ProviderUniverse:
         page_size = 1000
@@ -256,6 +286,10 @@ def map_zapi_summary_row(item: dict[str, object]) -> ProviderHistory:
         non_regular_volume_shares=_optional_int(item.get("NonRegularVolume")),
         non_regular_value_idr=_optional_decimal(item.get("NonRegularValue")),
         non_regular_frequency=_optional_int(item.get("NonRegularFrequency")),
+        listed_shares=_optional_int(item.get("ListedShares")),
+        tradeable_shares=_optional_int(item.get("TradebleShares")),
+        weight_for_index=_optional_int(item.get("WeightForIndex")),
+        index_individual=_optional_decimal(item.get("IndexIndividual")),
         source="zapi",
     )
     return ProviderHistory(

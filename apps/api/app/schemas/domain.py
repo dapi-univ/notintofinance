@@ -28,6 +28,10 @@ class MarketBar(BaseModel):
     non_regular_volume_shares: int | None = Field(default=None, ge=0)
     non_regular_value_idr: Decimal | None = Field(default=None, ge=0)
     non_regular_frequency: int | None = Field(default=None, ge=0)
+    listed_shares: int | None = Field(default=None, ge=0)
+    tradeable_shares: int | None = Field(default=None, ge=0)
+    weight_for_index: int | None = Field(default=None, ge=0)
+    index_individual: Decimal | None = Field(default=None, ge=0)
     source: str = Field(min_length=1)
     ingested_at: datetime | None = None
 
@@ -44,6 +48,17 @@ class ProviderHistory(BaseModel):
     stock: StockIdentity
     bars: list[MarketBar]
     rejected_items: int = Field(default=0, ge=0)
+
+
+class ProviderRowRejection(BaseModel):
+    ticker: str | None = None
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class ProviderDailySummary(BaseModel):
+    histories: list[ProviderHistory]
+    rows_received: int = Field(ge=0)
+    rejections: list[ProviderRowRejection] = Field(default_factory=list)
 
 
 class ProviderUniverse(BaseModel):

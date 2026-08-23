@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Protocol
 
-from app.schemas.domain import ProviderHistory, ProviderUniverse
+from app.schemas.domain import ProviderDailySummary, ProviderHistory, ProviderUniverse
 
 
 class MarketDataProvider(Protocol):
@@ -18,6 +18,6 @@ class MarketDataProvider(Protocol):
 
     async def get_daily_market_summary(
         self, *, trade_date: date | None = None
-    ) -> list[ProviderHistory]: ...
+    ) -> ProviderDailySummary: ...
 
     async def get_stock_universe(self) -> ProviderUniverse: ...

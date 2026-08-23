@@ -379,6 +379,10 @@ def _market_bar(row: DailyMarketData) -> MarketBar:
         non_regular_volume_shares=row.non_regular_volume_shares,
         non_regular_value_idr=row.non_regular_value_idr,
         non_regular_frequency=row.non_regular_frequency,
+        listed_shares=row.listed_shares,
+        tradeable_shares=row.tradeable_shares,
+        weight_for_index=row.weight_for_index,
+        index_individual=row.index_individual,
         source=row.source,
         ingested_at=row.ingested_at,
     )

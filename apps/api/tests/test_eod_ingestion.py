@@ -4,7 +4,13 @@ import httpx
 
 from app.providers.mock import MockMarketDataProvider
 from app.repositories.memory import MemoryMarketRepository
-from app.schemas.domain import ProviderHistory, ProviderUniverse
+from app.schemas.domain import (
+    MarketBar,
+    ProviderDailySummary,
+    ProviderHistory,
+    ProviderUniverse,
+    StockIdentity,
+)
 from app.services.ingestion import EodBatchIngestionService, IngestionMode, _classify_eod_error
 from app.services.market import HistoryTimeframe, MarketService
 
@@ -37,8 +43,24 @@ class RecordingProvider:
 
     async def get_daily_market_summary(
         self, *, trade_date: date | None = None
-    ) -> list[ProviderHistory]:
+    ) -> ProviderDailySummary:
         return await self._delegate.get_daily_market_summary(trade_date=trade_date)
+
+
+class OneRowFailingRepository(MemoryMarketRepository):
+    async def upsert_history(
+        self, stock: StockIdentity, bars: list[MarketBar]
+    ) -> tuple[int, int]:
+        if stock.ticker == "ANTM":
+            raise RuntimeError("isolated row failure")
+        return await super().upsert_history(stock, bars)
+
+
+class FailingSummaryProvider(RecordingProvider):
+    async def get_daily_market_summary(
+        self, *, trade_date: date | None = None
+    ) -> ProviderDailySummary:
+        raise RuntimeError("summary provider unavailable")
 
 
 def test_eod_http_429_is_classified_as_retryable() -> None:
@@ -140,3 +162,58 @@ async def test_provider_outage_does_not_prevent_database_history_reads() -> None
     assert history is not None
     assert len(history.bars) == 260
     assert history.bars[-1].frequency_analyzer_raw_shares is not None
+
+
+async def test_market_wide_summary_ingestion_is_idempotent() -> None:
+    repository = MemoryMarketRepository()
+    provider = RecordingProvider()
+    service = EodBatchIngestionService(provider, repository)
+    await service.synchronize_universe()
+
+    first = await service.ingest_market_summary(trade_date=date(2026, 8, 21))
+    second = await service.ingest_market_summary(trade_date=date(2026, 8, 21))
+
+    assert first.rows_received == first.rows_valid == 6
+    assert first.rows_inserted == 6
+    assert second.rows_inserted == 0
+    assert second.rows_updated == 6
+
+
+async def test_market_wide_summary_repository_failure_does_not_cancel_valid_rows() -> None:
+    repository = OneRowFailingRepository()
+    provider = RecordingProvider()
+    service = EodBatchIngestionService(provider, repository)
+    await service.synchronize_universe()
+
+    result = await service.ingest_market_summary(trade_date=date(2026, 8, 21))
+
+    assert result.rows_received == result.rows_valid == 6
+    assert result.row_failures == 1
+    assert result.rows_inserted == 5
+    assert len(await repository.get_history("BBCA", date_from=None, date_to=None, limit=None)) == 1
+    assert await repository.get_history("ANTM", date_from=None, date_to=None, limit=None) == []
+
+
+async def test_market_summary_outage_records_failure_and_preserves_history() -> None:
+    repository = MemoryMarketRepository()
+    healthy = RecordingProvider()
+    await EodBatchIngestionService(healthy, repository).synchronize_universe()
+    await EodBatchIngestionService(healthy, repository).ingest(["BBCA"])
+    existing = await repository.get_history(
+        "BBCA", date_from=None, date_to=None, limit=None
+    )
+
+    failing = EodBatchIngestionService(FailingSummaryProvider(), repository)
+    try:
+        await failing.ingest_market_summary(trade_date=date(2026, 8, 21))
+    except RuntimeError as error:
+        assert str(error) == "summary provider unavailable"
+    else:
+        raise AssertionError("provider failure was not propagated")
+
+    status = await repository.latest_ingestion()
+    assert status is not None and status.status == "failed"
+    assert (
+        await repository.get_history("BBCA", date_from=None, date_to=None, limit=None)
+        == existing
+    )
