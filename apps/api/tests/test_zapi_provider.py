@@ -10,6 +10,7 @@ def test_zapi_history_mapping_supports_direct_response_and_preserves_share_units
         {
             "code": "BBCA",
             "name": "Bank Central Asia Tbk.",
+            "unit": "shares",
             "items": [
                 {
                     "date": "2026-08-21",
@@ -68,6 +69,16 @@ def test_zapi_history_mapping_supports_wrapped_live_response() -> None:
 def test_zapi_history_mapping_rejects_malformed_envelope() -> None:
     with pytest.raises(ValueError, match="stock-history data must be an object"):
         map_zapi_history({"data": [], "project": "fixture-project"})
+
+
+def test_zapi_history_mapping_rejects_wrapped_non_share_unit() -> None:
+    with pytest.raises(ValueError, match="stock-history unit must be shares"):
+        map_zapi_history({"data": {"unit": "lots"}})
+
+
+def test_zapi_history_mapping_rejects_direct_non_share_unit() -> None:
+    with pytest.raises(ValueError, match="stock-history unit must be shares"):
+        map_zapi_history({"unit": "lots"})
 
 
 def test_zapi_summary_maps_non_regular_fields() -> None:

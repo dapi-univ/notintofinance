@@ -101,11 +101,12 @@ def map_zapi_history(payload: dict[str, object]) -> ProviderHistory:
 
 
 def _unwrap_zapi_history(payload: dict[str, object]) -> dict[str, object]:
-    if "data" not in payload:
-        return payload
-    history = payload["data"]
-    if not isinstance(history, dict):
-        raise ValueError("Zapi stock-history data must be an object")
+    history = payload
+    if "data" in payload:
+        wrapped = payload["data"]
+        if not isinstance(wrapped, dict):
+            raise ValueError("Zapi stock-history data must be an object")
+        history = wrapped
     unit = history.get("unit")
     if unit is not None and unit != "shares":
         raise ValueError("Zapi stock-history unit must be shares")
