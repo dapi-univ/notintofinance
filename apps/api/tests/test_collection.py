@@ -18,6 +18,10 @@ from app.services.collection import (
 )
 
 
+def closed_session_weekend_clock() -> datetime:
+    return datetime(2026, 8, 23, 2, tzinfo=UTC)
+
+
 class CollectionRepository:
     def __init__(self) -> None:
         self.cursors: dict[tuple[str, str, date], IngestionCursorState] = {}
@@ -271,7 +275,11 @@ async def test_broker_summary_rejects_silent_historical_date_substitution() -> N
 async def test_running_cursor_is_partial_then_resumes_to_complete_with_same_filter() -> None:
     provider = CollectionProvider()
     repository = CollectionRepository()
-    service = MarketCollectionService(provider, repository)  # type: ignore[arg-type]
+    service = MarketCollectionService(
+        provider,
+        repository,  # type: ignore[arg-type]
+        now=closed_session_weekend_clock,
+    )
     kwargs = {
         "trade_date": date(2026, 8, 21),
         "reference_prices": {"BBCA": Decimal("6450")},
@@ -308,7 +316,11 @@ async def test_running_cursor_is_partial_then_resumes_to_complete_with_same_filt
 async def test_resumable_session_rejects_a_different_collection_floor() -> None:
     provider = CollectionProvider()
     repository = CollectionRepository()
-    service = MarketCollectionService(provider, repository)  # type: ignore[arg-type]
+    service = MarketCollectionService(
+        provider,
+        repository,  # type: ignore[arg-type]
+        now=closed_session_weekend_clock,
+    )
     session = date(2026, 8, 21)
     await service.collect_running_trades(
         ["BBCA"],
@@ -338,7 +350,7 @@ async def test_ephemeral_collection_rejects_non_latest_and_active_unconfirmed_da
     historical = MarketCollectionService(
         provider,
         repository,  # type: ignore[arg-type]
-        now=lambda: datetime(2026, 8, 23, 2, tzinfo=UTC),
+        now=closed_session_weekend_clock,
     )
     active_day = MarketCollectionService(
         provider,
@@ -370,7 +382,7 @@ async def test_weekend_latest_session_binds_unasserted_provider_observation() ->
     service = MarketCollectionService(
         provider,
         repository,  # type: ignore[arg-type]
-        now=lambda: datetime(2026, 8, 23, 2, tzinfo=UTC),
+        now=closed_session_weekend_clock,
     )
 
     result = await service.collect_running_trades(
@@ -396,7 +408,11 @@ async def test_weekend_latest_session_binds_unasserted_provider_observation() ->
 async def test_tradebook_records_component_availability_without_fabricating_volume() -> None:
     provider = CollectionProvider()
     repository = CollectionRepository()
-    service = MarketCollectionService(provider, repository)  # type: ignore[arg-type]
+    service = MarketCollectionService(
+        provider,
+        repository,  # type: ignore[arg-type]
+        now=closed_session_weekend_clock,
+    )
 
     result = await service.collect_tradebook(
         ["BBCA"], trade_date=date(2026, 8, 21), concurrency=1
@@ -445,7 +461,11 @@ class OverlapProvider(CollectionProvider):
 async def test_running_newest_head_overlap_and_retry_counters_are_truthful() -> None:
     provider = OverlapProvider()
     repository = CollectionRepository()
-    service = MarketCollectionService(provider, repository)  # type: ignore[arg-type]
+    service = MarketCollectionService(
+        provider,
+        repository,  # type: ignore[arg-type]
+        now=closed_session_weekend_clock,
+    )
 
     result = await service.collect_running_trades(
         ["BBCA"],
@@ -481,7 +501,11 @@ async def test_legacy_partial_cursor_preserves_original_head() -> None:
             collection_floor_idr=Decimal(0),
         )
     )
-    service = MarketCollectionService(provider, repository)  # type: ignore[arg-type]
+    service = MarketCollectionService(
+        provider,
+        repository,  # type: ignore[arg-type]
+        now=closed_session_weekend_clock,
+    )
 
     result = await service.collect_running_trades(
         ["BBCA"],
@@ -501,7 +525,11 @@ async def test_all_updated_repeated_page_retains_zero_unique_facts() -> None:
     provider = OverlapProvider()
     repository = CollectionRepository()
     repository.trade_identities.update({"200", "199"})
-    service = MarketCollectionService(provider, repository)  # type: ignore[arg-type]
+    service = MarketCollectionService(
+        provider,
+        repository,  # type: ignore[arg-type]
+        now=closed_session_weekend_clock,
+    )
 
     result = await service.collect_running_trades(
         ["BBCA"],

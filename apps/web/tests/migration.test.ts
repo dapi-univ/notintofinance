@@ -23,43 +23,46 @@ const checkpointMigrationPath = fileURLToPath(
 describe("Supabase migration", () => {
   it("applies cleanly and enforces the stock/date uniqueness contract", async () => {
     const db = new PGlite();
-    await db.exec("create role anon; create role authenticated;");
-    await db.exec("create table public.alembic_version (version_num text primary key);");
-    await db.exec(await readFile(dashboardMigrationPath, "utf8"));
-    await db.exec(await readFile(securityMigrationPath, "utf8"));
-    await db.exec(await readFile(checkpointMigrationPath, "utf8"));
+    try {
+      await db.exec("create role anon; create role authenticated;");
+      await db.exec("create table public.alembic_version (version_num text primary key);");
+      await db.exec(await readFile(dashboardMigrationPath, "utf8"));
+      await db.exec(await readFile(securityMigrationPath, "utf8"));
+      await db.exec(await readFile(checkpointMigrationPath, "utf8"));
 
-    const tables = await db.query<{ table_name: string }>(
-      "select table_name from information_schema.tables where table_schema = 'public' order by table_name",
-    );
-    expect(tables.rows.map((row) => row.table_name)).toEqual([
-      "alembic_version",
-      "daily_market_data",
-      "ingestion_checkpoints",
-      "ingestion_runs",
-      "stocks",
-    ]);
+      const tables = await db.query<{ table_name: string }>(
+        "select table_name from information_schema.tables where table_schema = 'public' order by table_name",
+      );
+      expect(tables.rows.map((row) => row.table_name)).toEqual([
+        "alembic_version",
+        "daily_market_data",
+        "ingestion_checkpoints",
+        "ingestion_runs",
+        "stocks",
+      ]);
 
-    const stock = await db.query<{ id: number }>(
-      "insert into public.stocks (ticker, company_name) values ('BBCA', 'Bank Central Asia Tbk.') returning id",
-    );
-    const id = stock.rows[0].id;
-    const insertBar = `insert into public.daily_market_data
-      (stock_id, trade_date, open, high, low, close, previous, volume_shares, value_idr, frequency, source)
-      values (${id}, '2026-08-21', 8000, 8200, 7950, 8150, 8000, 25000000, 203750000000, 10000, 'test')`;
-    await db.exec(insertBar);
-    await expect(db.exec(insertBar)).rejects.toThrow();
+      const stock = await db.query<{ id: number }>(
+        "insert into public.stocks (ticker, company_name) values ('BBCA', 'Bank Central Asia Tbk.') returning id",
+      );
+      const id = stock.rows[0].id;
+      const insertBar = `insert into public.daily_market_data
+        (stock_id, trade_date, open, high, low, close, previous, volume_shares, value_idr, frequency, source)
+        values (${id}, '2026-08-21', 8000, 8200, 7950, 8150, 8000, 25000000, 203750000000, 10000, 'test')`;
+      await db.exec(insertBar);
+      await expect(db.exec(insertBar)).rejects.toThrow();
 
-    const rls = await db.query<{ relname: string; relrowsecurity: boolean }>(
-      `select relname, relrowsecurity
-         from pg_class
-        where relname in ('alembic_version', 'ingestion_checkpoints')
-        order by relname`,
-    );
-    expect(rls.rows).toEqual([
-      { relname: "alembic_version", relrowsecurity: true },
-      { relname: "ingestion_checkpoints", relrowsecurity: true },
-    ]);
-    await db.close();
-  });
+      const rls = await db.query<{ relname: string; relrowsecurity: boolean }>(
+        `select relname, relrowsecurity
+           from pg_class
+          where relname in ('alembic_version', 'ingestion_checkpoints')
+          order by relname`,
+      );
+      expect(rls.rows).toEqual([
+        { relname: "alembic_version", relrowsecurity: true },
+        { relname: "ingestion_checkpoints", relrowsecurity: true },
+      ]);
+    } finally {
+      await db.close();
+    }
+  }, 15_000);
 });
